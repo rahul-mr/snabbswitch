@@ -416,11 +416,11 @@ function new (pciaddress)
         ctx.ipcse = 0 --let it calculate packet length (set EOP flag)
         mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
+      --DO TCP/UDP settings for IPv4 here--
       else --ver == 0x60
-        flags = bits({dtype=20, eop=24, ifcs=25, dext=29, ixsm=40}) --set ixsm as per datasheet
+        flags = bits({dtype=20, eop=24, ifcs=25, dext=29, ixsm=40}) --set ixsm for data desc as per datasheet
+      --DO TCP/UDP settings for IPv6 here--
       end
-
-      --DO TCP/UDP settings here--
 
       tdt = (tdt + 1) % num_descriptors
       
