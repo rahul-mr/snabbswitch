@@ -383,21 +383,57 @@ function new (pciaddress)
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
 
-   function M.add_txbuf_tso (address, size, mss, ctx)
+   local ctx = nil
+
+   local function add_txbuf_tso (address, size, mss, context)
       ctx = ffi.cast("struct tx_context_desc *", txdesc + tdt)
-      ctx.tucse = 0
-      ctx.tucso = 0
-      ctx.tucss = 0
-      ctx.ipcse = 0
-      ctx.ipcso = 0
-      ctx.ipcss = 0
-      ctx.mss = 1440
-      ctx.hdrlen = 0
-      ctx.sta = 0
-      ctx.tucmd = 0
-      ctx.dtype = 0
-      ctx.paylen = 0
-   end
+      ctx.tucse  = 0    --TCP/UDP CheckSum End
+      ctx.tucso  = 0    --TCP/UDP CheckSum Offset
+      ctx.tucss  = 0    --TCP/UDP CheckSum Start
+      ctx.ipcse  = 0    --IP CheckSum End
+      ctx.ipcso  = 0    --IP CheckSum Offset
+      ctx.ipcss  = 0    --IP CheckSum Start
+      ctx.mss    = 1440 --Maximum Segment Size
+      ctx.hdrlen = 0    --Header Length
+      ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
+      ctx.tucmd  = bits({dext=5, rs=3}) --Command --dext for ctxt desc fmt; rs for result set
+                -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
+      ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
+      ctx.paylen = 0    --Payload Length
+      
+      local flags = txdesc_flags
+
+      local mem  = protected("uint64_t", context, 0, 1)
+      assert( bit.band(mem[0], 0xffffffffffffff00) == 0x5555555555555500, "Invalid Ethernet frame/Unknown format");
+      
+      mem = protected("uint8_t", context, 26, 12)
+      local ver = bit.band(mem[0], 0x60)
+      assert(ver ~= 0, "Invalid IP version/Unknown format");
+
+      if ver == 0x40 then
+        ctx.ipcss = 26
+        ctx.ipcso = 36
+        ctx.ipcse = 0 --let it calculate packet length (set EOP flag)
+        mem[10] = 0   --clear IP header checksum field H
+        mem[11] = 0   --clear IP header checksum field L
+      else --ver == 0x60
+        flags = bits({dtype=20, eop=24, ifcs=25, dext=29, ixsm=40}) --set ixsm as per datasheet
+      end
+
+      --DO TCP/UDP settings here--
+
+      tdt = (tdt + 1) % num_descriptors
+      
+      txdesc[tdt].data.address = address
+      txdesc[tdt].data.options = bit.bor(size, flags)
+      
+      tdt = (tdt + 1) % num_descriptors
+   end M.add_txbuf_tso = add_txbuf_tso
+
+   local function context_desc_done(ctx)
+      assert(ctx ~= nil, "ctx cannot be nil")
+      return bit.band(ctx.sta, bits({dd=0}))
+   end M.context_desc_done = context_desc_done 
 
    function M.tx_full  () return M.tx_pending() == num_descriptors - 1 end
    function M.tx_empty () return M.tx_pending() == 0 end
