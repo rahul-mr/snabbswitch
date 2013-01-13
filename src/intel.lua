@@ -393,7 +393,7 @@ function new (pciaddress)
       ctx.ipcse  = 0    --IP CheckSum End
       ctx.ipcso  = 0    --IP CheckSum Offset
       ctx.ipcss  = 0    --IP CheckSum Start
-      ctx.mss    = 1440 --Maximum Segment Size
+      ctx.mss    = mss  --Maximum Segment Size (1440)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
       ctx.tucmd  = bits({dext=5, rs=3}) --Command --dext for ctxt desc fmt; rs for result set
@@ -410,14 +410,26 @@ function new (pciaddress)
       local ver = bit.band(mem[0], 0x60)
       assert(ver ~= 0, "Invalid IP version/Unknown format");
 
-      if ver == 0x40 then
+      if ver == 0x40 then --IPv4
         ctx.ipcss = 26
-        ctx.ipcso = 36
-        ctx.ipcse = 0 --let it calculate packet length (set EOP flag)
+        ctx.ipcso = 26 + 10
+        ctx.ipcse = 0 --let it calculate packet length (Note: EOP flag must be set)
         mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
-      --DO TCP/UDP settings for IPv4 here--
-      else --ver == 0x60
+      --TCP/UDP settings for IPv4 here--
+	    if mem[9] == 0x06 then --TCP
+	      ctx.tucss = 26 + 24
+          ctx.tucso = 26 + 24 + 16
+          ctx.tucse = 26 + 24 + 16 + 2
+ 
+		else if mem[9] == 0x11 then--UDP
+	      ctx.tucss = 26 + 24  
+          ctx.tucso = 26 + 24 + 6 
+          ctx.tucse = 26 + 24 + 6 + 2
+		else
+		  assert(false, "Invalid/Unimplemented IP data protocol")
+	    end
+      else --ver == 0x60 --IPv6
         flags = bits({dtype=20, eop=24, ifcs=25, dext=29, ixsm=40}) --set ixsm for data desc as per datasheet
       --DO TCP/UDP settings for IPv6 here--
       end
