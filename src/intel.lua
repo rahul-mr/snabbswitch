@@ -404,40 +404,63 @@ function new (pciaddress)
       local flags = txdesc_flags
 
       local mem  = protected("uint64_t", context, 0, 1)
-      assert( bit.band(mem[0], 0xffffffffffffff00) == 0x5555555555555500, "Invalid Ethernet frame/Unknown format");
+      assert( bit.band(mem[0], 0xffffffffffffff00LL) == 0x5555555555555500LL, "Invalid Ethernet frame/Unknown format");
       
-      mem = protected("uint8_t", context, 26, 12)
+      mem = protected("uint8_t", context, 26, 12) --for accessing IP header fields
       local ver = bit.band(mem[0], 0x60)
       assert(ver ~= 0, "Invalid IP version/Unknown format");
 
       if ver == 0x40 then --IPv4
         ctx.ipcss = 26
         ctx.ipcso = 26 + 10
-        ctx.ipcse = 0 --let it calculate packet length (Note: EOP flag must be set)
-        mem[10] = 0   --clear IP header checksum field H
+        ctx.ipcse = 0 -- (Note: EOP flag must be set)
+        
+		mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
-      --TCP/UDP settings for IPv4 here--
-	    if mem[9] == 0x06 then --TCP
-	      ctx.tucss = 26 + 24
-          ctx.tucso = 26 + 24 + 16
-          ctx.tucse = 26 + 24 + 16 + 2
+        
+		local total_len = protected("uint16_t", context, 26+2, 1) --IP packet length
+
+		--TCP/UDP settings for IPv4 here--
+	    ctx.tucss = 26 + 24           --TCP/UDP header start
+        ctx.tucse = 26 + total_len[0] --TCP/UDP header end
+	    
+		if mem[9] == 0x06 then      --TCP
+          ctx.tucso = 26 + 24 + 16    --TCP checksum offset
  
-		else if mem[9] == 0x11 then--UDP
-	      ctx.tucss = 26 + 24  
-          ctx.tucso = 26 + 24 + 6 
-          ctx.tucse = 26 + 24 + 6 + 2
+		else if mem[9] == 0x11 then --UDP
+          ctx.tucso = 26 + 24 + 6     --UDP checksum offset 
+
 		else
 		  assert(false, "Invalid/Unimplemented IP data protocol")
 	    end
+
       else --ver == 0x60 --IPv6
-        flags = bits({dtype=20, eop=24, ifcs=25, dext=29, ixsm=40}) --set ixsm for data desc as per datasheet
-      --DO TCP/UDP settings for IPv6 here--
-      end
+        ctx.ipcss = 26
+        ctx.ipcso = 26 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
+        ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag must be cleared)
+
+		local total_len = protected("uint16_t", context, 26+4, 1) --IP packet length
+
+		--TCP/UDP settings for IPv6 here-- 
+	    ctx.tucss = 26 + 40           --TCP/UDP header start
+        ctx.tucse = 26 + total_len[0] --TCP/UDP header end
+        
+		if mem[6] == 0x06 then      --TCP
+          ctx.tucso = 26 + 40 + 16    --TCP checksum offset
+ 
+		else if mem[6] == 0x11 then --UDP
+          ctx.tucso = 26 + 40 + 6     --UDP checksum offset
+		
+	    else
+		  assert(false, "Invalid/Unimplemented IP data protocol")
+	    end
+ 
+      end --ver
 
       tdt = (tdt + 1) % num_descriptors
       
       txdesc[tdt].data.address = address
-      txdesc[tdt].data.options = bit.bor(size, flags)
+      txdesc[tdt].data.options = bit.bor(size, txdesc_flags)
       
       tdt = (tdt + 1) % num_descriptors
    end M.add_txbuf_tso = add_txbuf_tso
