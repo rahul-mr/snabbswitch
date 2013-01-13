@@ -386,7 +386,9 @@ function new (pciaddress)
    local ctx = nil
 
    local function add_txbuf_tso (address, size, mss, context)
-      ctx = ffi.cast("struct tx_context_desc *", txdesc + tdt)
+      print "DBG: starting add_txbuf_tso"
+      ui_tdt = ffi.cast("unsigned int", tdt)
+      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + ui_tdt)
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
       ctx.tucss  = 0    --TCP/UDP CheckSum Start
@@ -400,69 +402,81 @@ function new (pciaddress)
                 -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
-      
-      local flags = txdesc_flags
+
+      print "DBG: CP1"      
 
       local mem = protected("uint8_t", context, 14, 12) --for accessing IP header fields
       local ver = bit.band(mem[0], 0x60)
       assert(ver ~= 0, "Invalid IP version/Unknown format");
+
+      print "DBG: CP2"
 
       if ver == 0x40 then --IPv4
         ctx.ipcss = 14      --Ethernet frame header len
         ctx.ipcso = 14 + 10
         ctx.ipcse = 0 -- (Note: EOP flag must be set)
         
-		mem[10] = 0   --clear IP header checksum field H
+        print "DBG: CP3"
+
+        mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
        
-		local ihl = bit.band(mem[0], 0x0f)
+        local ihl = bit.band(mem[0], 0x0f)
 
-		local options_len = 0
-		if ihl > 5 then
-			options_len = ihl * 4
+        local options_len = 0
 
-		local total_len = protected("uint16_t", context, 14+2, 1) --IP packet length
+        if ihl > 5 then
+            options_len = ihl * 4
+        end
 
-		--TCP/UDP settings for IPv4 here--
-	    ctx.tucss = 14 + 20 + options_len --TCP/UDP header start
+        local total_len = protected("uint16_t", context, 14+2, 1) --IP packet length
+
+        print "DBG: CP4"
+
+        --TCP/UDP settings for IPv4 here--
+        ctx.tucss = 14 + 20 + options_len --TCP/UDP header start
         ctx.tucse = 14 + total_len[0]     --TCP/UDP header end
-	    
-		if mem[9] == 0x06 then      --TCP
+        
+        if mem[9] == 0x06 then      --TCP
           ctx.tucso = 14 + 20 + options_len + 16    --TCP checksum offset
  
-		else if mem[9] == 0x11 then --UDP
+        elseif mem[9] == 0x11 then --UDP
           ctx.tucso = 14 + 20 + options_len + 6     --UDP checksum offset 
 
-		else
-		  assert(false, "Invalid/Unimplemented IP data protocol")
-	    end
+        else
+          assert(false, "Invalid/Unimplemented IP data protocol")
+        end
+       
+        print "DBG: CP5"
 
-		total_len[0] = 0 --reset IP packet length
+        total_len[0] = 0 --reset IP packet length
 
       else --ver == 0x60 --IPv6
         ctx.ipcss = 14
         ctx.ipcso = 14 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
         ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag must be cleared)
 
-		local total_len = protected("uint16_t", context, 14+4, 1) --IP packet length
+        local total_len = protected("uint16_t", context, 14+4, 1) --IP packet length
 
-		--TCP/UDP settings for IPv6 here-- 
-	    ctx.tucss = 14 + 40           --TCP/UDP header start
+        --TCP/UDP settings for IPv6 here-- 
+        ctx.tucss = 14 + 40           --TCP/UDP header start
         ctx.tucse = 14 + total_len[0] --TCP/UDP header end
         
-		if mem[6] == 0x06 then      --TCP
+        if mem[6] == 0x06 then      --TCP
           ctx.tucso = 14 + 40 + 16    --TCP checksum offset
  
-		else if mem[6] == 0x11 then --UDP
+        elseif mem[6] == 0x11 then --UDP
           ctx.tucso = 14 + 40 + 6     --UDP checksum offset
-		
-	    else
-		  assert(false, "Invalid/Unimplemented IP data protocol")
-	    end
+        
+        else
+          assert(false, "Invalid/Unimplemented IP data protocol")
+        end
  
-		total_len[0] = 0 --reset IP packet length
+        total_len[0] = 0 --reset IP packet length
 
       end --ver
+
+      print "DBG: CP6"
 
       tdt = (tdt + 1) % num_descriptors
       add_txbuf(address, size)
@@ -689,17 +703,17 @@ function new (pciaddress)
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
-	  print "waiting for old traffic to die out ..."
+      print "waiting for old traffic to die out ..."
       C.usleep(100000) -- Wait for old traffic from previous tests to die out
       M.update_stats()
       local txhardware_start = M.stats.GPTC
 
-	  print "adding tso test buffer..."
+      print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
       add_tso_test_buffer(size, mss)
       txeth = txeth + math.ceil(1.0 * size / mss)
       
-	  print "waiting for packet transmission..."
+      print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
       C.usleep(100000) -- wait for transmit
       M.update_stats()
@@ -715,17 +729,18 @@ function new (pciaddress)
 
    function add_tso_test_buffer (size, mss)
       -- Construct a TCP packet of 'size' total bytes and transmit with TSO.
-	--simple tcp/ip packet with payload data = "asdf" (size=4)
-	local packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
-  	                0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
-	                0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
- 	                0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
-	
-	for i = 1, 58, 1 do
-		buffers[i-1] = packet[i]
-	end
+    --simple tcp/ip packet with payload data = "asdf" (size=4)
+    local packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
+                    0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
+                    0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
+                    0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
+    
+--    for i = 0, 57, 1 do
+--        print (packet[i+1])
+--        buffers[i] = packet[i+1]
+--    end
 
-	add_txbuf_tso (buffers_phy, 58, 1500, buffers_phy)
+    add_txbuf_tso (buffers_phy, 58, 1500, buffers_phy)
    end
 
    return M
