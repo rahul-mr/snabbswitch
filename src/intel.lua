@@ -684,21 +684,24 @@ function new (pciaddress)
    function M.selftest_tso (options)
       print "selftest: TCP Segmentation Offload (TSO)"
       options = options or {}
-      local size = options.size or 4096
+      local size = options.size or 4 --4096
       local mss  = options.mss  or 1500
-      local txtcp = 0 -- Total number of TCP packets sent
+      local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
+	  print "waiting for old traffic to die out ..."
       C.usleep(100000) -- Wait for old traffic from previous tests to die out
       M.update_stats()
       local txhardware_start = M.stats.GPTC
 
+	  print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
       add_tso_test_buffer(size, mss)
-      txeth = txeth + math.ceil(size / mss)
+      txeth = txeth + math.ceil(1.0 * size / mss)
       
+	  print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
-      C.usleep(100000) -- wait for receive
+      C.usleep(100000) -- wait for transmit
       M.update_stats()
       local txhardware = txhardware_start - M.stats.GPTC
 
@@ -710,8 +713,19 @@ function new (pciaddress)
       end
    end
 
-   function add_tso_test_buffer (size)
+   function add_tso_test_buffer (size, mss)
       -- Construct a TCP packet of 'size' total bytes and transmit with TSO.
+	--simple tcp/ip packet with payload data = "asdf" (size=4)
+	local packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
+  	                0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
+	                0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
+ 	                0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
+	
+	for i = 1, 58, 1 do
+		buffers[i-1] = packet[i]
+	end
+
+	add_txbuf_tso (buffers_phy, 58, 1500, buffers_phy)
    end
 
    return M
