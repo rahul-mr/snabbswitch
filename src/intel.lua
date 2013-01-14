@@ -405,8 +405,9 @@ function new (pciaddress)
 
    local function add_txbuf_tso (address, size, mss, context)
       print "DBG: starting add_txbuf_tso"
-      --ui_tdt = ffi.cast("unsigned int", tdt)
-      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + tdt)
+      ui_tdt = ffi.cast("unsigned int", 0)
+      ui_tdt = tdt
+      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + ui_tdt)
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
       ctx.tucss  = 0    --TCP/UDP CheckSum Start
@@ -729,7 +730,7 @@ function new (pciaddress)
 
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
-      add_tso_test_buffer(size, mss)
+      M.add_tso_test_buffer(size, mss)
       txeth = txeth + math.ceil(size / mss)
       
       print "waiting for packet transmission..."
@@ -746,7 +747,7 @@ function new (pciaddress)
       end
    end
 
-   function add_tso_test_buffer (size, mss)
+   function M.add_tso_test_buffer (size, mss)
       -- Construct a TCP packet of 'size' total bytes and transmit with TSO.
     --simple tcp/ip packet with payload data = "asdf" (size=4)
     local packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
@@ -759,7 +760,8 @@ function new (pciaddress)
         buffers[i] = packet[i+1]
     end
 
-    add_txbuf_tso (buffers_phy, 58, 1500, buffers_phy)
+    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers_phy)
+    M.flush_tx()
    end
 
    return M
