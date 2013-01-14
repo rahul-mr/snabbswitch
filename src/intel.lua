@@ -108,19 +108,24 @@ function new (pciaddress)
    end
 
    function reset ()
+      io.write("DBG: reset: start\n")
       regs[IMC] = 0                       -- Disable interrupts
       regs[CTRL] = bits({FD=0,SLU=6,RST=26}) -- Global reset
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0                       -- Disable interrupts
+      io.write("DBG: reset: stop\n")
    end
 
    function init_pci ()
+      io.write("DBG: init_pci: start\n")
       -- PCI bus mastering has to be enabled for DMA to work.
       pci_config_fd = pci.open_config(pciaddress)
       pci.set_bus_master(pci_config_fd, true)
+      io.write("DBG: init_pci: stop\n")
    end
 
    function init_dma_memory ()
+      io.write("DBG: init_dma_memory: start\n")
       local descriptor_bytes = 1024 * 1024
       local buffers_bytes = 2 * 1024 * 1024
       rxdesc, rxdesc_phy = memory.dma_alloc(descriptor_bytes)
@@ -130,20 +135,26 @@ function new (pciaddress)
       rxdesc  = protected("union rx", rxdesc, 0, descriptor_bytes)
       txdesc  = protected("union tx", txdesc, 0, descriptor_bytes)
       buffers = protected("uint8_t", buffers, 0, buffers_bytes)
+      io.write("DBG: init_dma_memory: stop\n")
    end
 
    function init_link ()
+      io.write("DBG: init_link: start\n")
       reset_phy()
       -- phy_write(9, bit.bor(bits({Adv1GFDX=9})))
       -- force_autoneg()
+      io.write("DBG: init_link: stop\n")
    end
 
    function init_statistics ()
+      io.write("DBG: init_statistics: start\n")
       -- Statistics registers initialize themselves within 1ms of a reset.
       C.usleep(1000)
+      io.write("DBG: init_statistics: stop\n")
    end
 
    function M.print_status ()
+      io.write("DBG: print_status: start\n")
       local status, tctl, rctl = regs[STATUS], regs[TCTL], regs[RCTL]
       print("MAC status")
       print("  STATUS      = " .. bit.tohex(status))
@@ -198,6 +209,7 @@ function new (pciaddress)
       print("  Partner     10 Mb/s FD = " .. yesno(partner,6))
       print("  Partner     10 Mb/s HD = " .. yesno(partner,5))
       --   print("Power state              = D"..bit.band(regs[PMCSR],3))
+      io.write("DBG: print_status: stop\n")
    end
 
    function yesno (value, bit)
@@ -234,6 +246,7 @@ function new (pciaddress)
    local rxbuffers = {}
 
    function init_receive ()
+      io.write("DBG: init_receive: start\n")
       -- Disable RX and program all the registers
       regs[RCTL] = bits({UPE=3, MPE=4, -- Unicast & Multicast promiscuous mode
             LPE=5,        -- Long Packet Enable (over 1522 bytes)
@@ -253,6 +266,7 @@ function new (pciaddress)
       rxnext = 0
       -- Enable RX
       regs[RCTL] = bit.bor(regs[RCTL], bits{EN=1})
+      io.write("DBG: init_receive: stop\n")
    end
 
    local rdt = 0
@@ -344,6 +358,7 @@ function new (pciaddress)
    ]]
 
    function init_transmit ()
+      io.write("DBG: init_transmit: start\n")
       regs[TCTL]        = 0x3103f0f8
       regs[TXDCTL]      = 0x01410000
       regs[TIPG] = 0x00602006 -- Suggested value in data sheet
@@ -354,14 +369,17 @@ function new (pciaddress)
       regs[TXDCTL]      = 0x01410000
       regs[TCTL]        = 0x3103f0fa
 
+      io.write("DBG: init_transmit: stop\n")
    end
 
    function init_transmit_ring ()
+      io.write("DBG: init_transmit_ring: start\n")
       regs[TDBAL] = bit.band(txdesc_phy, 0xffffffff)
       regs[TDBAH] = 0
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
+      io.write("DBG: init_transmit_ring: stop\n")
    end
 
    -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
@@ -387,8 +405,8 @@ function new (pciaddress)
 
    local function add_txbuf_tso (address, size, mss, context)
       print "DBG: starting add_txbuf_tso"
-      ui_tdt = ffi.cast("unsigned int", tdt)
-      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + ui_tdt)
+      --ui_tdt = ffi.cast("unsigned int", tdt)
+      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + tdt)
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
       ctx.tucss  = 0    --TCP/UDP CheckSum Start
@@ -481,6 +499,7 @@ function new (pciaddress)
       tdt = (tdt + 1) % num_descriptors
       add_txbuf(address, size)
 
+      io.write("DBG: add_txbuf_tso: stopping")
    end M.add_txbuf_tso = add_txbuf_tso
 
    local function context_desc_done(ctx)
@@ -711,7 +730,7 @@ function new (pciaddress)
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
       add_tso_test_buffer(size, mss)
-      txeth = txeth + math.ceil(1.0 * size / mss)
+      txeth = txeth + math.ceil(size / mss)
       
       print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
@@ -735,10 +754,10 @@ function new (pciaddress)
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
     
---    for i = 0, 57, 1 do
---        print (packet[i+1])
---        buffers[i] = packet[i+1]
---    end
+    for i = 0, 57, 1 do
+        print (packet[i+1])
+        buffers[i] = packet[i+1]
+    end
 
     add_txbuf_tso (buffers_phy, 58, 1500, buffers_phy)
    end
