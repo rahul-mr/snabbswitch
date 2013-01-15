@@ -428,7 +428,7 @@ function new (pciaddress)
       ctx.mss    = mss  --Maximum Segment Size (1440)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
-      ctx.tucmd  = bits({dext=5}) --Command --dext: ctxt desc fmt
+      ctx.tucmd  = bits({dext=5, tse=2}) --Command --dext: ctxt desc fmt
                 -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
@@ -443,8 +443,9 @@ function new (pciaddress)
       if ver == 0x40 then --IPv4
         ctx.ipcss = 14      --Ethernet frame header len
         ctx.ipcso = 14 + 10
-        ctx.ipcse = 0 -- (Note: EOP flag must be set)
-        
+        ctx.ipcse = 0        -- (Note: EOP flag must be set)
+        ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
+ 
         mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
        
@@ -464,20 +465,21 @@ function new (pciaddress)
         
         if mem[9] == 0x06 then      --TCP
           ctx.tucso = 14 + 20 + options_len + 16    --TCP checksum offset
- 
+          ctx.tucmd = bits({tcp=0}, ctx.tucmd)      --set TCP flag
+--FIX hdrlen
         elseif mem[9] == 0x11 then --UDP
           ctx.tucso = 14 + 20 + options_len + 6     --UDP checksum offset 
 
         else
           assert(false, "Invalid/Unimplemented IP data protocol")
         end
-       
+--FIX paylen       
         total_len[0] = 0 --reset IP packet length
 
       else --ver == 0x60 --IPv6
         ctx.ipcss = 14
         ctx.ipcso = 14 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
-        ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag must be cleared)
+        ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag of data descriptor must be cleared)
 
         local total_len = protected("uint16_t", context, 14+4, 2) --IP packet length
 
@@ -487,14 +489,15 @@ function new (pciaddress)
         
         if mem[6] == 0x06 then      --TCP
           ctx.tucso = 14 + 40 + 16    --TCP checksum offset
- 
+          ctx.tucmd = bits({tcp=0}, ctx.tucmd)      --set TCP flag
+--FIX hdrlen 
         elseif mem[6] == 0x11 then --UDP
           ctx.tucso = 14 + 40 + 6     --UDP checksum offset
         
         else
           assert(false, "Invalid/Unimplemented IP data protocol")
         end
- 
+ --FIX paylen
         total_len[0] = 0 --reset IP packet length
 
       end --ver
@@ -514,7 +517,8 @@ function new (pciaddress)
                                         bit.lshift(ctx.paylen,  0) )
 
       tdt = (tdt + 1) % num_descriptors
-      M.add_txbuf(address, size)
+      M.flush_tx() --write context descriptor
+      M.add_txbuf(address, size) --write data descriptor
 
       io.write("DBG: add_txbuf_tso: stop\n")
    end
