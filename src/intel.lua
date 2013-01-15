@@ -414,7 +414,7 @@ function new (pciaddress)
    end M.flush_tx = flush_tx
 
    function M.add_txbuf_tso (address, size, mss, context)
-      print "DBG: starting add_txbuf_tso"
+      io.write("DBG: add_txbuf_tso: start\n")
       --ui_tdt = ffi.cast("uint32_t", 0)
       --ui_tdt = tdt
       --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
@@ -433,56 +433,18 @@ function new (pciaddress)
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
 
-
       --context = buffers._ptr
-      
-      print "DBG: CP1"      
 
       local mem = protected("uint8_t", context, 14, 12) --for accessing IP header fields
       
-      print "DBG: CP1.1"
-      print "mem[0] = "
-      print (mem[0])
-      print "mem[1] = "
-      print (mem[1])
-      print "mem[2] = "
-      print (mem[2])
-      print "mem[3] = "
-      print (mem[3])
-      print "mem[4] = "
-      print (mem[4])
-      print "mem[5] = "
-      print (mem[5])
-      print "mem[6] = "
-      print (mem[6])
-      print "mem[7] = "
-      print (mem[7])
-      print "mem[8] = "
-      print (mem[8])
-      print "mem[9] = "
-      print (mem[9])
-      print "mem[10] = "
-      print (mem[10])
-      print "mem[11] = "
-      print (mem[11])
-      
-      print "DBG: CP1.1.1"
-
       local ver = bit.band(mem[0], 0x60)
-
-      print "DBG: CP1.2"
-
       assert(ver ~= 0, "Invalid IP version/Unknown format");
-
-      print "DBG: CP2"
 
       if ver == 0x40 then --IPv4
         ctx.ipcss = 14      --Ethernet frame header len
         ctx.ipcso = 14 + 10
         ctx.ipcse = 0 -- (Note: EOP flag must be set)
         
-        print "DBG: CP3"
-
         mem[10] = 0   --clear IP header checksum field H
         mem[11] = 0   --clear IP header checksum field L
        
@@ -495,8 +457,6 @@ function new (pciaddress)
         end
 
         local total_len = protected("uint16_t", context, 14+2, 2) --IP packet length
-
-        print "DBG: CP4"
 
         --TCP/UDP settings for IPv4 here--
         ctx.tucss = 14 + 20 + options_len --TCP/UDP header start
@@ -512,8 +472,6 @@ function new (pciaddress)
           assert(false, "Invalid/Unimplemented IP data protocol")
         end
        
-        print "DBG: CP5"
-
         total_len[0] = 0 --reset IP packet length
 
       else --ver == 0x60 --IPv6
@@ -541,8 +499,6 @@ function new (pciaddress)
 
       end --ver
 
-      print "DBG: CP6"
-
       txdesc[tdt].ctx.block0 = bit.bor( bit.lshift(ctx.tucse,  48),
                                         bit.lshift(ctx.tucso,  40),
                                         bit.lshift(ctx.tucss,  32),
@@ -560,7 +516,7 @@ function new (pciaddress)
       tdt = (tdt + 1) % num_descriptors
       M.add_txbuf(address, size)
 
-      io.write("DBG: add_txbuf_tso: stopping")
+      io.write("DBG: add_txbuf_tso: stop\n")
    end
  
    function M.tx_full  () return M.tx_pending() == num_descriptors - 1 end
@@ -812,9 +768,8 @@ function new (pciaddress)
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
     
     for i = 0, 57, 1 do
-        --print (packet[i+1])
         buffers[i] = packet[i+1]
-	print (buffers[i])
+	--print (buffers[i])
     end
 
     M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
