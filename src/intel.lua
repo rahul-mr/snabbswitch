@@ -36,7 +36,7 @@ function new (pciaddress)
    --   mem[0x000] => <word at 0x1000>
    --   mem[0x001] => <word at 0x1004>
    --   mem[0x080] => ERROR <address out of bounds: 0x1200>
-   --   mem.ptr   => cdata<uint32_t *>: 0x1000 (get the raw pointer)
+   --   mem._ptr   => cdata<uint32_t *>: 0x1000 (get the raw pointer)
    local function protected (type, base, offset, size)
       type = ffi.typeof(type)
       local bound = (size + 0ULL) / ffi.sizeof(type)
@@ -128,9 +128,11 @@ function new (pciaddress)
       io.write("DBG: init_dma_memory: start\n")
       local descriptor_bytes = 1024 * 1024
       local buffers_bytes = 2 * 1024 * 1024
-      rxdesc, rxdesc_phy = memory.dma_alloc(descriptor_bytes)
-      txdesc, txdesc_phy = memory.dma_alloc(descriptor_bytes)
-      buffers, buffers_phy = memory.dma_alloc(buffers_bytes)
+      local rxmin, txmin, bufmin
+      rxdesc, rxdesc_phy, rxmin = memory.dma_alloc(descriptor_bytes)
+      txdesc, txdesc_phy, txmin = memory.dma_alloc(descriptor_bytes)
+      buffers, buffers_phy, bufmin = memory.dma_alloc(buffers_bytes)
+      io.write("DBG: rxmin = "..tostring(rxmin).." txmin = "..tostring(txmin).." bufmin = "..tostring(bufmin).."\n")
       -- Add bounds checking
       rxdesc  = protected("union rx", rxdesc, 0, descriptor_bytes)
       txdesc  = protected("union tx", txdesc, 0, descriptor_bytes)
@@ -335,6 +337,10 @@ function new (pciaddress)
             uint64_t options;
          } __attribute__((packed));
 
+
+       /********************************
+        * Not used (only for reference)
+        ********************************
          struct tx_context_desc {
             unsigned int tucse:16,
                          tucso:8,
@@ -349,6 +355,12 @@ function new (pciaddress)
                          tucmd:8,
                          dtype:4,
                          paylen:20;
+         } __attribute__((packed));
+       ********************************/
+
+	 struct tx_context_desc {
+	     uint64_t block0;
+             uint64_t block1;
          } __attribute__((packed));
 
          union tx {
@@ -401,13 +413,12 @@ function new (pciaddress)
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
 
-   local ctx = nil
-
-   local function add_txbuf_tso (address, size, mss, context)
+   function M.add_txbuf_tso (address, size, mss, context)
       print "DBG: starting add_txbuf_tso"
-      ui_tdt = ffi.cast("unsigned int", 0)
-      ui_tdt = tdt
-      ctx = ffi.cast("struct tx_context_desc *", txdesc_phy + ui_tdt)
+      --ui_tdt = ffi.cast("uint32_t", 0)
+      --ui_tdt = tdt
+      --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
+      local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
       ctx.tucss  = 0    --TCP/UDP CheckSum Start
@@ -417,15 +428,50 @@ function new (pciaddress)
       ctx.mss    = mss  --Maximum Segment Size (1440)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
-      ctx.tucmd  = bits({dext=5, rs=3}) --Command --dext for ctxt desc fmt; rs for result set
+      ctx.tucmd  = bits({dext=5}) --Command --dext: ctxt desc fmt
                 -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
 
+
+      --context = buffers._ptr
+      
       print "DBG: CP1"      
 
       local mem = protected("uint8_t", context, 14, 12) --for accessing IP header fields
+      
+      print "DBG: CP1.1"
+      print "mem[0] = "
+      print (mem[0])
+      print "mem[1] = "
+      print (mem[1])
+      print "mem[2] = "
+      print (mem[2])
+      print "mem[3] = "
+      print (mem[3])
+      print "mem[4] = "
+      print (mem[4])
+      print "mem[5] = "
+      print (mem[5])
+      print "mem[6] = "
+      print (mem[6])
+      print "mem[7] = "
+      print (mem[7])
+      print "mem[8] = "
+      print (mem[8])
+      print "mem[9] = "
+      print (mem[9])
+      print "mem[10] = "
+      print (mem[10])
+      print "mem[11] = "
+      print (mem[11])
+      
+      print "DBG: CP1.1.1"
+
       local ver = bit.band(mem[0], 0x60)
+
+      print "DBG: CP1.2"
+
       assert(ver ~= 0, "Invalid IP version/Unknown format");
 
       print "DBG: CP2"
@@ -448,7 +494,7 @@ function new (pciaddress)
             options_len = ihl * 4
         end
 
-        local total_len = protected("uint16_t", context, 14+2, 1) --IP packet length
+        local total_len = protected("uint16_t", context, 14+2, 2) --IP packet length
 
         print "DBG: CP4"
 
@@ -497,17 +543,26 @@ function new (pciaddress)
 
       print "DBG: CP6"
 
+      txdesc[tdt].ctx.block0 = bit.bor( bit.lshift(ctx.tucse,  48),
+                                        bit.lshift(ctx.tucso,  40),
+                                        bit.lshift(ctx.tucss,  32),
+                                        bit.lshift(ctx.ipcse,  16),
+                                        bit.lshift(ctx.ipcso,   8),
+                                        bit.lshift(ctx.ipcss,   0) )
+      
+      txdesc[tdt].ctx.block1 = bit.bor( bit.lshift(ctx.mss,    48),
+                                        bit.lshift(ctx.hdrlen, 40),
+                                        bit.lshift(ctx.sta,    32),
+                                        bit.lshift(ctx.tucmd,  24),
+                                        bit.lshift(ctx.dtype,  20),
+                                        bit.lshift(ctx.paylen,  0) )
+
       tdt = (tdt + 1) % num_descriptors
-      add_txbuf(address, size)
+      M.add_txbuf(address, size)
 
       io.write("DBG: add_txbuf_tso: stopping")
-   end M.add_txbuf_tso = add_txbuf_tso
-
-   local function context_desc_done(ctx)
-      assert(ctx ~= nil, "ctx cannot be nil")
-      return bit.band(ctx.sta, bits({dd=0}))
-   end M.context_desc_done = context_desc_done 
-
+   end
+ 
    function M.tx_full  () return M.tx_pending() == num_descriptors - 1 end
    function M.tx_empty () return M.tx_pending() == 0 end
 
@@ -757,11 +812,12 @@ function new (pciaddress)
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
     
     for i = 0, 57, 1 do
-        print (packet[i+1])
+        --print (packet[i+1])
         buffers[i] = packet[i+1]
+	print (buffers[i])
     end
 
-    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers_phy)
+    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
     M.flush_tx()
    end
 
