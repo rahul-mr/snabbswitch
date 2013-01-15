@@ -456,7 +456,7 @@ function new (pciaddress)
             options_len = ihl * 4
         end
 
-        local total_len = protected("uint16_t", context, 14+2, 2) --IP packet length
+        local total_len = protected("uint16_t", context, 14+2, 2) --IP packet length --ERR: if size: 1  __index assert fail
 
         --TCP/UDP settings for IPv4 here--
         ctx.tucss = 14 + 20 + options_len --TCP/UDP header start
@@ -479,7 +479,7 @@ function new (pciaddress)
         ctx.ipcso = 14 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
         ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag must be cleared)
 
-        local total_len = protected("uint16_t", context, 14+4, 1) --IP packet length
+        local total_len = protected("uint16_t", context, 14+4, 2) --IP packet length
 
         --TCP/UDP settings for IPv6 here-- 
         ctx.tucss = 14 + 40           --TCP/UDP header start
