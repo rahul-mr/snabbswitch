@@ -39,7 +39,7 @@ function new (pciaddress)
    --   mem._ptr   => cdata<uint32_t *>: 0x1000 (get the raw pointer)
    local function protected (type, base, offset, size)
       type = ffi.typeof(type)
-      local bound = (size + 0ULL) / ffi.sizeof(type)
+      local bound = ((size * ffi.sizeof(type)) + 0ULL) / ffi.sizeof(type)
       local tptr = ffi.typeof("$ *", type)
       local wrap = ffi.metatype(ffi.typeof("struct { $ _ptr; }", tptr), {
                                    __index = function(w, idx)
@@ -415,8 +415,7 @@ function new (pciaddress)
 
    function M.add_txbuf_tso (address, size, mss, context)
       io.write("DBG: add_txbuf_tso: start\n")
-      --ui_tdt = ffi.cast("uint32_t", 0)
-      --ui_tdt = tdt
+      --ui_tdt = ffi.cast("uint32_t", tdt)
       --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
       local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
@@ -440,10 +439,12 @@ function new (pciaddress)
       local ver = bit.band(mem[0], 0x60)
       assert(ver ~= 0, "Invalid IP version/Unknown format");
 
+      local ipcs_off = -1 -- IP checksum offset
+      local encap    = -1 -- encapsulation of payload: 0: IPv4+TCP; 1: IPv4+UDP; 2: IPv6+TCP; 3: IPv6+UDP
+      local hdr_off  = -1 -- offset to TCP/UDP header
+      local pkt_len  = -1 -- packet length
+
       if ver == 0x40 then --IPv4
-        ctx.ipcss = 14      --Ethernet frame header len
-        ctx.ipcso = 14 + 10
-        ctx.ipcse = 0        -- (Note: EOP flag must be set)
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
  
         mem[10] = 0   --clear IP header checksum field H
@@ -457,50 +458,64 @@ function new (pciaddress)
             options_len = ihl * 4
         end
 
-        local total_len = protected("uint16_t", context, 14+2, 2) --IP packet length --ERR: if size: 1  __index assert fail
+        pkt_len = (protected("uint16_t", context, 14+2, 1))[0] --IP packet length
 
         --TCP/UDP settings for IPv4 here--
-        ctx.tucss = 14 + 20 + options_len --TCP/UDP header start
-        ctx.tucse = 14 + total_len[0]     --TCP/UDP header end
         
-        if mem[9] == 0x06 then      --TCP
-          ctx.tucso = 14 + 20 + options_len + 16    --TCP checksum offset
-          ctx.tucmd = bits({tcp=0}, ctx.tucmd)      --set TCP flag
---FIX hdrlen
-        elseif mem[9] == 0x11 then --UDP
-          ctx.tucso = 14 + 20 + options_len + 6     --UDP checksum offset 
+        hdr_off = 20 + options_len
 
+        if mem[9] == 0x06 then      --TCP
+          encap = 0
+        elseif mem[9] == 0x11 then --UDP
+          encap = 1
         else
           assert(false, "Invalid/Unimplemented IP data protocol")
         end
 --FIX paylen       
-        total_len[0] = 0 --reset IP packet length
 
       else --ver == 0x60 --IPv6
         ctx.ipcss = 14
         ctx.ipcso = 14 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
         ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag of data descriptor must be cleared)
 
-        local total_len = protected("uint16_t", context, 14+4, 2) --IP packet length
-
+        pkt_len = (protected("uint16_t", context, 14+4, 1))[0] --IP packet length
+	hdr_off = 40
         --TCP/UDP settings for IPv6 here-- 
-        ctx.tucss = 14 + 40           --TCP/UDP header start
-        ctx.tucse = 14 + total_len[0] --TCP/UDP header end
         
-        if mem[6] == 0x06 then      --TCP
-          ctx.tucso = 14 + 40 + 16    --TCP checksum offset
-          ctx.tucmd = bits({tcp=0}, ctx.tucmd)      --set TCP flag
---FIX hdrlen 
+        if mem[6] == 0x06 then     --TCP
+          encap = 2 
         elseif mem[6] == 0x11 then --UDP
-          ctx.tucso = 14 + 40 + 6     --UDP checksum offset
-        
+          encap = 3
         else
           assert(false, "Invalid/Unimplemented IP data protocol")
         end
  --FIX paylen
-        total_len[0] = 0 --reset IP packet length
+        
 
       end --ver
+
+      assert(ipcs_off ~= -1, "ipcs_off not set")
+      assert(encap ~= -1,    "encap not set")
+      assert(hdr_off ~= -1,  "hdr_off not set")
+      assert(pkt_len ~= -1,  "pkt_len not set")
+
+      ctx.ipcss = 14      --Ethernet frame header len
+      ctx.ipcso = 14 + 10
+      ctx.ipcse = 0        -- (Note: EOP flag must be set)
+
+      ctx.tucss = 14 + hdr_off  --TCP/UDP header start
+      ctx.tucse = 14 + pkt_len  --TCP/UDP packet end
+      if encap == 0 then --IPv4 + TCP
+        ctx.tucso = 14 + hdr_off + 16        --TCP checksum offset
+        ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
+        ctx.hdrlen = 
+      elseif encap == 1 then --IPv4 + UDP
+      elseif encap == 2 then --IPv6 + TCP
+      elseif encap == 3 then --IPv6 + UDP
+
+      end
+
+      pkt_len = 0 --reset IP packet length
 
       txdesc[tdt].ctx.block0 = bit.bor( bit.lshift(ctx.tucse,  48),
                                         bit.lshift(ctx.tucso,  40),
@@ -770,7 +785,10 @@ function new (pciaddress)
                     0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
-    
+
+    print('DBG: ffi.sizeof("uint16_t") = ')
+    print(ffi.sizeof("uint16_t"))
+
     for i = 0, 57, 1 do
         buffers[i] = packet[i+1]
 	--print (buffers[i])
