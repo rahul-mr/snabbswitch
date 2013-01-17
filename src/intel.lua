@@ -440,8 +440,8 @@ function new (pciaddress)
 
       assert(ipcs_off ~= -1, "ipcs_off not set")
       assert(hdr_len  ~= -1, "hdr_len not set")
-      assert(pkt_len  ~= -1, "pkt_len not set")
-      assert(prot_off ~= -1, "pkt_len not set")
+      assert(plen_off ~= -1, "plen_off not set")
+      assert(prot_off ~= -1, "prot_off not set")
 
       local pkt_len = (protected("uint16_t", context, frame_len + plen_off, 1))[0]
 
@@ -708,6 +708,8 @@ function new (pciaddress)
       C.usleep(100000) -- Wait for old traffic from previous tests to die out
       M.update_stats()
       local txhardware_start = M.stats.GPTC
+      M.print_stats()
+      M.print_status()
 
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
@@ -719,6 +721,8 @@ function new (pciaddress)
       C.usleep(100000) -- wait for transmit
       M.update_stats()
       local txhardware = txhardware_start - M.stats.GPTC
+      M.print_stats()
+      M.print_status()
 
       -- Check results
       print("size", "mss", "txtcp", "txeth", "txhw")
@@ -746,6 +750,8 @@ function new (pciaddress)
 
     M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
     M.flush_tx()
+    print "\n\nDBG: checking status:\n\n"
+    M.print_status()
    end
 
    return M
