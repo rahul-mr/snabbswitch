@@ -55,7 +55,7 @@ function new (pciaddress)
    end
 
    local num_descriptors = 32 * 1024
-   local buffer_size = 16384
+   local buffer_count = 2 * 1024 * 1024
 
    local rxdesc, rxdesc_phy
    local txdesc, txdesc_phy
@@ -343,8 +343,8 @@ function new (pciaddress)
          } __attribute__((packed));
        ********************************/
 
-	 struct tx_context_desc {
-	     uint64_t block0;
+         struct tx_context_desc {
+             uint64_t block0;
              uint64_t block1;
          } __attribute__((packed));
 
@@ -433,7 +433,7 @@ function new (pciaddress)
         prot_off = 9
       else --ver == 0x60 --IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
-	hdr_len  = 40
+        hdr_len  = 40
         plen_off = 4
         prot_off = 6 
       end --ver
@@ -741,7 +741,7 @@ function new (pciaddress)
 
     for i = 0, 57, 1 do
         buffers[i] = packet[i+1]
-	--print (buffers[i])
+      --print (buffers[i])
     end
 
     M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
