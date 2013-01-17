@@ -443,7 +443,25 @@ function new (pciaddress)
       assert(plen_off ~= -1, "plen_off not set")
       assert(prot_off ~= -1, "prot_off not set")
 
-      local pkt_len = (protected("uint16_t", context, frame_len + plen_off, 1))[0]
+      print("DBG: A ipcs_off = " .. bit.tohex(14 + ipcs_off) )
+      print("DBG: A hdr_len  = " .. bit.tohex(14 + hdr_len) )
+      print("DBG: A plen_off = " .. bit.tohex(14 + plen_off) )
+      print("DBG: A prot_off = " .. bit.tohex(14 + prot_off) )
+
+      print("DBG: pl -2 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off - 2, 1))[0]))
+      print("DBG: pl -1 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off - 1, 1))[0]))
+      print("DBG: pl    = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off    , 1))[0]))
+      print("DBG: pl +1 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off + 1, 1))[0]))
+      print("DBG: pl +2 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off + 2, 1))[0]))
+
+      print("DBG: [16]pl= " .. bit.tohex((protected("uint16_t", context, frame_len + plen_off    , 1)[0])))
+
+      print("DBG: context = " .. tostring(ffi.cast("uint32_t",context)) )
+      print("DBG: context + frame_len + plen_off = " .. tostring(ffi.cast("uint32_t",context) + frame_len + plen_off) )
+      print("DBG: context + frame_len + plen_off + 1 = " .. tostring(ffi.cast("uint32_t",context) + frame_len + plen_off + 1) )
+
+      local pkt_len = (protected("uint16_t", context, frame_len + plen_off + 1, 1))[0]
+      print("DBG: pkt_len = " .. bit.tohex(pkt_len))
 
       ctx.ipcss = frame_len     
       ctx.ipcso = frame_len + ipcs_off
@@ -454,11 +472,16 @@ function new (pciaddress)
 
       ctx.paylen = pkt_len - hdr_len 
 
+      print("DBG: ctx.paylen = ".. bit.tohex(ctx.paylen))
+
+      print("DBG: mem[proto_off] = " .. bit.tohex(mem[prot_off]))
+
       if mem[prot_off] == 0x06 then -- TCP specific
         ctx.tucso = frame_len + hdr_len + 16 --TCP checksum offset
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
         local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
+        print("DBG: data_off = " .. bit.tohex(data_off))
         ctx.hdrlen = frame_len + hdr_len + data_off * 4
 
       elseif mem[prot_off] == 0x11 then --UDP specific
@@ -740,9 +763,6 @@ function new (pciaddress)
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
 
-    print('DBG: ffi.sizeof("uint16_t") = ')
-    print(ffi.sizeof("uint16_t"))
-
     for i = 0, 57, 1 do
         buffers[i] = packet[i+1]
       --print (buffers[i])
@@ -750,8 +770,6 @@ function new (pciaddress)
 
     M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
     M.flush_tx()
-    print "\n\nDBG: checking status:\n\n"
-    M.print_status()
    end
 
    return M
