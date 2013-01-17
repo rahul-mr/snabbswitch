@@ -108,55 +108,43 @@ function new (pciaddress)
    end
 
    function reset ()
-      io.write("DBG: reset: start\n")
       regs[IMC] = 0                       -- Disable interrupts
       regs[CTRL] = bits({FD=0,SLU=6,RST=26}) -- Global reset
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0                       -- Disable interrupts
-      io.write("DBG: reset: stop\n")
    end
 
    function init_pci ()
-      io.write("DBG: init_pci: start\n")
       -- PCI bus mastering has to be enabled for DMA to work.
       pci_config_fd = pci.open_config(pciaddress)
       pci.set_bus_master(pci_config_fd, true)
-      io.write("DBG: init_pci: stop\n")
    end
 
    function init_dma_memory ()
-      io.write("DBG: init_dma_memory: start\n")
-      local descriptor_bytes = 1024 * 1024
-      local buffers_bytes = 2 * 1024 * 1024
-      local rxmin, txmin, bufmin
-      rxdesc, rxdesc_phy, rxmin = memory.dma_alloc(descriptor_bytes)
-      txdesc, txdesc_phy, txmin = memory.dma_alloc(descriptor_bytes)
-      buffers, buffers_phy, bufmin = memory.dma_alloc(buffers_bytes)
-      io.write("DBG: rxmin = "..tostring(rxmin).." txmin = "..tostring(txmin).." bufmin = "..tostring(bufmin).."\n")
+      --local descriptor_bytes = 1024 * 1024
+      --local buffers_bytes = 2 * 1024 * 1024
+      rxdesc, rxdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union rx"))
+      txdesc, txdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union tx"))
+      buffers, buffers_phy = memory.dma_alloc(buffer_count * ffi.sizeof("uint8_t"))
       -- Add bounds checking
-      rxdesc  = protected("union rx", rxdesc, 0, descriptor_bytes)
-      txdesc  = protected("union tx", txdesc, 0, descriptor_bytes)
-      buffers = protected("uint8_t", buffers, 0, buffers_bytes)
-      io.write("DBG: init_dma_memory: stop\n")
+      rxdesc  = protected("union rx", rxdesc, 0, num_descriptors)
+      txdesc  = protected("union tx", txdesc, 0, num_descriptors)
+      buffers = protected("uint8_t", buffers, 0, buffer_count)
    end
+   
 
    function init_link ()
-      io.write("DBG: init_link: start\n")
       reset_phy()
       -- phy_write(9, bit.bor(bits({Adv1GFDX=9})))
       -- force_autoneg()
-      io.write("DBG: init_link: stop\n")
    end
 
    function init_statistics ()
-      io.write("DBG: init_statistics: start\n")
       -- Statistics registers initialize themselves within 1ms of a reset.
       C.usleep(1000)
-      io.write("DBG: init_statistics: stop\n")
    end
 
    function M.print_status ()
-      io.write("DBG: print_status: start\n")
       local status, tctl, rctl = regs[STATUS], regs[TCTL], regs[RCTL]
       print("MAC status")
       print("  STATUS      = " .. bit.tohex(status))
@@ -211,7 +199,6 @@ function new (pciaddress)
       print("  Partner     10 Mb/s FD = " .. yesno(partner,6))
       print("  Partner     10 Mb/s HD = " .. yesno(partner,5))
       --   print("Power state              = D"..bit.band(regs[PMCSR],3))
-      io.write("DBG: print_status: stop\n")
    end
 
    function yesno (value, bit)
@@ -248,7 +235,6 @@ function new (pciaddress)
    local rxbuffers = {}
 
    function init_receive ()
-      io.write("DBG: init_receive: start\n")
       -- Disable RX and program all the registers
       regs[RCTL] = bits({UPE=3, MPE=4, -- Unicast & Multicast promiscuous mode
             LPE=5,        -- Long Packet Enable (over 1522 bytes)
@@ -268,7 +254,6 @@ function new (pciaddress)
       rxnext = 0
       -- Enable RX
       regs[RCTL] = bit.bor(regs[RCTL], bits{EN=1})
-      io.write("DBG: init_receive: stop\n")
    end
 
    local rdt = 0
@@ -370,7 +355,6 @@ function new (pciaddress)
    ]]
 
    function init_transmit ()
-      io.write("DBG: init_transmit: start\n")
       regs[TCTL]        = 0x3103f0f8
       regs[TXDCTL]      = 0x01410000
       regs[TIPG] = 0x00602006 -- Suggested value in data sheet
@@ -380,18 +364,14 @@ function new (pciaddress)
       regs[TDT] = 0
       regs[TXDCTL]      = 0x01410000
       regs[TCTL]        = 0x3103f0fa
-
-      io.write("DBG: init_transmit: stop\n")
    end
 
    function init_transmit_ring ()
-      io.write("DBG: init_transmit_ring: start\n")
       regs[TDBAL] = bit.band(txdesc_phy, 0xffffffff)
       regs[TDBAH] = 0
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
-      io.write("DBG: init_transmit_ring: stop\n")
    end
 
    -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
@@ -413,8 +393,7 @@ function new (pciaddress)
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
 
-   function M.add_txbuf_tso (address, size, mss, context)
-      io.write("DBG: add_txbuf_tso: start\n")
+   local function add_txbuf_tso (address, size, mss, context)
       --ui_tdt = ffi.cast("uint32_t", tdt)
       --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
       local ctx = { }
@@ -427,92 +406,66 @@ function new (pciaddress)
       ctx.mss    = mss  --Maximum Segment Size (1440)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
-      ctx.tucmd  = bits({dext=5, tse=2}) --Command --dext: ctxt desc fmt
+      ctx.tucmd  = bits({dext=5, tse=2}) --Command --dext: ctxt desc fmt ; tse: TCP Segmentation Enable
                 -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
 
-      --context = buffers._ptr
+      --context = buffers._ptr --test
 
-      local mem = protected("uint8_t", context, 14, 12) --for accessing IP header fields
-      
+      local frame_len = 14 -- Ethernet frame length
+      local mem = protected("uint8_t", context, frame_len, 12) --for accessing IP header fields
       local ver = bit.band(mem[0], 0x60)
       assert(ver ~= 0, "Invalid IP version/Unknown format");
 
-      local ipcs_off = -1 -- IP checksum offset
-      local encap    = -1 -- encapsulation of payload: 0: IPv4+TCP; 1: IPv4+UDP; 2: IPv6+TCP; 3: IPv6+UDP
-      local hdr_off  = -1 -- offset to TCP/UDP header
-      local pkt_len  = -1 -- packet length
+      local ipcs_off = -1 -- IP checksum field offset
+      local hdr_len  = -1 -- IP header length
+      local plen_off = -1 -- IP payload length field offset
+      local prot_off = -1 -- IP protocol field offset
 
       if ver == 0x40 then --IPv4
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
- 
-        mem[10] = 0   --clear IP header checksum field H
-        mem[11] = 0   --clear IP header checksum field L
-       
-        local ihl = bit.band(mem[0], 0x0f)
-
-        local options_len = 0
-
-        if ihl > 5 then
-            options_len = ihl * 4
-        end
-
-        pkt_len = (protected("uint16_t", context, 14+2, 1))[0] --IP packet length
-
-        --TCP/UDP settings for IPv4 here--
-        
-        hdr_off = 20 + options_len
-
-        if mem[9] == 0x06 then      --TCP
-          encap = 0
-        elseif mem[9] == 0x11 then --UDP
-          encap = 1
-        else
-          assert(false, "Invalid/Unimplemented IP data protocol")
-        end
---FIX paylen       
-
+        ipcs_off = 10
+        mem[ipcs_off]     = 0   --clear IP header checksum field H
+        mem[ipcs_off + 1] = 0   --clear IP header checksum field L
+        hdr_len = 4 * bit.band(mem[0], 0x0f) --IHL field
+        plen_off = 2
+        prot_off = 9
       else --ver == 0x60 --IPv6
-        ctx.ipcss = 14
-        ctx.ipcso = 14 + 2 -- this will be ignored when flags are set (hopefully) otherwise IP packet corruption WILL happen
-        ctx.ipcse = 0      -- (Note: EOP must be set, IXSM flag of data descriptor must be cleared)
-
-        pkt_len = (protected("uint16_t", context, 14+4, 1))[0] --IP packet length
-	hdr_off = 40
-        --TCP/UDP settings for IPv6 here-- 
-        
-        if mem[6] == 0x06 then     --TCP
-          encap = 2 
-        elseif mem[6] == 0x11 then --UDP
-          encap = 3
-        else
-          assert(false, "Invalid/Unimplemented IP data protocol")
-        end
- --FIX paylen
-        
-
+        ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
+	hdr_len  = 40
+        plen_off = 4
+        prot_off = 6 
       end --ver
 
       assert(ipcs_off ~= -1, "ipcs_off not set")
-      assert(encap ~= -1,    "encap not set")
-      assert(hdr_off ~= -1,  "hdr_off not set")
-      assert(pkt_len ~= -1,  "pkt_len not set")
+      assert(hdr_len  ~= -1, "hdr_len not set")
+      assert(pkt_len  ~= -1, "pkt_len not set")
+      assert(prot_off ~= -1, "pkt_len not set")
 
-      ctx.ipcss = 14      --Ethernet frame header len
-      ctx.ipcso = 14 + 10
-      ctx.ipcse = 0        -- (Note: EOP flag must be set)
+      local pkt_len = (protected("uint16_t", context, frame_len + plen_off, 1))[0]
 
-      ctx.tucss = 14 + hdr_off  --TCP/UDP header start
-      ctx.tucse = 14 + pkt_len  --TCP/UDP packet end
-      if encap == 0 then --IPv4 + TCP
-        ctx.tucso = 14 + hdr_off + 16        --TCP checksum offset
+      ctx.ipcss = frame_len     
+      ctx.ipcso = frame_len + ipcs_off
+      ctx.ipcse = 0 -- (Note: EOP flag must be set)
+
+      ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
+      ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
+
+      ctx.paylen = pkt_len - hdr_len 
+
+      if mem[prot_off] == 0x06 then -- TCP specific
+        ctx.tucso = frame_len + hdr_len + 16 --TCP checksum offset
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
-        ctx.hdrlen = 
-      elseif encap == 1 then --IPv4 + UDP
-      elseif encap == 2 then --IPv6 + TCP
-      elseif encap == 3 then --IPv6 + UDP
 
+        local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
+        ctx.hdrlen = frame_len + hdr_len + data_off * 4
+
+      elseif mem[prot_off] == 0x11 then --UDP specific
+        ctx.tucso = frame_len + hdr_len + 6 --UDP checksum offset
+        ctx.hdrlen = frame_len + hdr_len + 6 + 2
+      else
+        assert(false, "Invalid/Unimplemented IP data protocol")
       end
 
       pkt_len = 0 --reset IP packet length
@@ -532,11 +485,8 @@ function new (pciaddress)
                                         bit.lshift(ctx.paylen,  0) )
 
       tdt = (tdt + 1) % num_descriptors
-      M.flush_tx() --write context descriptor
       M.add_txbuf(address, size) --write data descriptor
-
-      io.write("DBG: add_txbuf_tso: stop\n")
-   end
+   end M.add_txbuf_tso = add_txbuf_tso
  
    function M.tx_full  () return M.tx_pending() == num_descriptors - 1 end
    function M.tx_empty () return M.tx_pending() == 0 end
