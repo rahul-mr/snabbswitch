@@ -27,7 +27,7 @@ end
 function install_huge_page ()
    local page = allocate_huge_page()
    if page == nil then error("Failed to allocate HugeTLB page for DMA.") end
-   chunk_ptr, chunk_phy, chunk_size = ffi.cast("char*",page), map(page), huge_page_size
+   chunk_ptr, chunk_phy, chunk_size = ffi.cast("uint8_t *",page), map(page), huge_page_size
 end
 
 --- DMA is allocated from the current chunk, which is replaced once it
@@ -67,7 +67,7 @@ end
 
 function allocate_huge_page ()
    for i = 1,3 do
-      local page = C.allocate_huge_page(huge_page_size)
+      local page = C.allocate_huge_page(ffi.cast("uint64_t", huge_page_size))
       if page ~= nil then  return page  else  reserve_new_page()  end
    end
 end
@@ -97,8 +97,9 @@ end
 
 -- Return the physical page number of virtpage.
 function resolve (virt_page)
-   local phys_page = C.phys_page(virt_page)
-   if phys_page == 0 then error("Unable to resolve page " .. virt_page) end
+   virt_page = ffi.cast("uint64_t", virt_page)
+   local phys_page = tonumber(C.phys_page(virt_page))
+   if phys_page == 0 then error("Unable to resolve page " .. tonumber(virt_page)) end
    return phys_page
 end
 

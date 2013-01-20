@@ -248,8 +248,11 @@ function new (pciaddress)
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
       regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
+      print("DBG: rxdesc_phy = "..tostring(rxdesc_phy))
       regs[RDBAL] = rxdesc_phy % (2^32)
-      regs[RDBAH] = math.floor(rxdesc_phy / (2^32)) 
+      print("DBG: regs[RDBAL] = "..tostring(regs[RDBAL]))
+      regs[RDBAH] = rxdesc_phy / (2^32) 
+      print("DBG: regs[RDBAH] = "..tostring(regs[RDBAH]))
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
@@ -377,8 +380,11 @@ function new (pciaddress)
    end
 
    function init_transmit_ring ()
+      print("DBG: txdesc_phy = "..tostring(txdesc_phy))
       regs[TDBAL] = txdesc_phy % (2^32)
-      regs[TDBAH] = math.floor(txdesc_phy / (2^32)) 
+      print("DBG: regs[TDBAL] = "..tostring(regs[TDBAL]))
+      regs[TDBAH] = txdesc_phy / (2^32) 
+      print("DBG: regs[TDBAH] = "..tostring(regs[TDBAH]))
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
