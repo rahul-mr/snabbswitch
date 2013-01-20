@@ -25,6 +25,36 @@ function new (pciaddress)
    -- Method dictionary for Intel NIC objects.
    local M = {}
 
+   -- Return a table for protected (bounds-checked) memory access.
+   -- 
+   -- The table can be indexed like a pointer. Index 0 refers to address
+   -- BASE+OFFSET, index N refers to address BASE+OFFSET+N*sizeof(TYPE),
+   -- and access to indices >= SIZE is prohibited.
+   --
+   -- Examples:
+   --   local mem =  protected("uint32_t", 0x1000, 0x0, 0x080)
+   --   mem[0x000] => <word at 0x1000>
+   --   mem[0x001] => <word at 0x1004>
+   --   mem[0x07F] => <word at 0x11FC>
+   --   mem[0x080] => ERROR <address out of bounds: 0x1200>
+   --   mem._ptr   => cdata<uint32_t *>: 0x1000 (get the raw pointer)
+   local function protected (type, base, offset, size)
+      type = ffi.typeof(type)
+      local bound = ((size * ffi.sizeof(type)) + 0ULL) / ffi.sizeof(type) 
+      local tptr = ffi.typeof("$ *", type)
+      local wrap = ffi.metatype(ffi.typeof("struct { $ _ptr; }", tptr), {
+                                   __index = function(w, idx)
+                                                assert(idx < bound)
+                                                return w._ptr[idx]
+                                             end,
+                                   __newindex = function(w, idx, val)
+                                                   assert(idx < bound)
+                                                   w._ptr[idx] = val
+                                                end,
+                                })
+      return wrap(ffi.cast(tptr, ffi.cast("uint8_t *", base) + offset))
+   end
+
    local num_descriptors = 32 * 1024
    local buffer_count = 2 * 1024 * 1024
 
@@ -91,7 +121,17 @@ function new (pciaddress)
       pci.set_bus_master(pci_config_fd, true)
    end
 
-  
+   function init_dma_memory ()
+      --local descriptor_bytes = 1024 * 1024
+      --local buffers_bytes = 2 * 1024 * 1024
+      rxdesc, rxdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union rx"))
+      txdesc, txdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union tx"))
+      buffers, buffers_phy = memory.dma_alloc(buffer_count * ffi.sizeof("uint8_t"))
+      -- Add bounds checking
+      rxdesc  = protected("union rx", rxdesc, 0, num_descriptors)
+      txdesc  = protected("union tx", txdesc, 0, num_descriptors)
+      buffers = protected("uint8_t", buffers, 0, buffer_count)
+   end
 
    function init_link ()
       reset_phy()
