@@ -109,10 +109,10 @@ function new (pciaddress)
    end
 
    function reset ()
-      regs[IMC] = 0                       -- Disable interrupts
+      regs[IMC] = 0xffffffff                 -- Disable interrupts
       regs[CTRL] = bits({FD=0,SLU=6,RST=26}) -- Global reset
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
-      regs[IMC] = 0                       -- Disable interrupts
+      regs[IMC] = 0xffffffff                 -- Disable interrupts
    end
 
    function init_pci ()
@@ -248,17 +248,8 @@ function new (pciaddress)
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
       regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
-
-      print("DBG: rxdesc_phy = ")
-      print(rxdesc_phy) --lower 32 bits
-      print("DBG: RDBAL = "..tostring( rxdesc_phy % (2^32) ))
-      print("DBG: RDBAH = "..tostring( (rxdesc_phy / (2^32)) ))
-
       regs[RDBAL] = rxdesc_phy % (2^32)
-      regs[RDBAH] = math.floor(rxdesc_phy / (2^32)) --note: bitop supports only 32-bit operations :-( 
-
-      --regs[RDBAL] = bit.band(rxdesc_phy, 0xffffffff)
-      --regs[RDBAH] = 0 --note: bitop supports only 32-bit operations :-( 
+      regs[RDBAH] = math.floor(rxdesc_phy / (2^32)) 
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
@@ -386,14 +377,8 @@ function new (pciaddress)
    end
 
    function init_transmit_ring ()
-      print("DBG: txdesc_phy = ")
-      print(txdesc_phy) --lower 32 bits
-      print("DBG: TDBAL = "..tostring( txdesc_phy % (2^32) ))
-      print("DBG: TDBAH = "..tostring( (txdesc_phy / (2^32)) ))
-
       regs[TDBAL] = txdesc_phy % (2^32)
-      regs[TDBAH] = math.floor(txdesc_phy / (2^32)) --note: bitop supports only 32-bit operations :-( 
-
+      regs[TDBAH] = math.floor(txdesc_phy / (2^32)) 
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
