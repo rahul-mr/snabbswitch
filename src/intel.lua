@@ -514,7 +514,7 @@ function new (pciaddress)
       
       txdesc[tdt].ctx.tucmd_dtype_paylen = bit.bor( bit.lshift(ctx.tucmd,  24),
                                                     bit.lshift(ctx.dtype,  20),
-                                                    bit.lshift(ctx.paylen,  0) )
+                                                               ctx.paylen      )
 
       tdt = (tdt + 1) % num_descriptors
       M.add_txbuf(address, size) --write data descriptor

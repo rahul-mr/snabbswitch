@@ -89,17 +89,17 @@ end
 -- Return the physical address of virt_addr as a number.
 function map (virt_addr)
    virt_addr = ffi.cast("uint64_t", virt_addr)
-   local virt_page = tonumber(virt_addr / base_page_size)
-   local offset    = tonumber(virt_addr % base_page_size)
+   local virt_page = (virt_addr / base_page_size)
+   local offset    = (virt_addr % base_page_size)
    local phys_page = resolve(virt_page)
-   return tonumber(ffi.cast("uint64_t", phys_page * base_page_size + offset))
+   return (ffi.cast("uint64_t", phys_page * base_page_size + offset))
 end
 
 -- Return the physical page number of virtpage.
 function resolve (virt_page)
    virt_page = ffi.cast("uint64_t", virt_page)
-   local phys_page = tonumber(C.phys_page(virt_page))
-   if phys_page == 0 then error("Unable to resolve page " .. tonumber(virt_page)) end
+   local phys_page = (C.phys_page(virt_page))
+   if tonumber(phys_page) == 0 then error("Unable to resolve page " .. tonumber(virt_page)) end
    return phys_page
 end
 
