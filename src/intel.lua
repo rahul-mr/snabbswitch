@@ -229,6 +229,7 @@ function new (pciaddress)
             struct rx_desc data;
             struct rx_desc_wb wb;
          } __attribute__((packed));
+
    ]]
 
    local rxnext = 0
@@ -247,8 +248,17 @@ function new (pciaddress)
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
       regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
-      regs[RDBAL] = bit.band(rxdesc_phy, 0xffffffff)
-      regs[RDBAH] = 0
+
+      print("DBG: rxdesc_phy = ")
+      print(rxdesc_phy) --lower 32 bits
+      print("DBG: RDBAL = "..tostring( rxdesc_phy % (2^32) ))
+      print("DBG: RDBAH = "..tostring( (rxdesc_phy / (2^32)) ))
+
+      regs[RDBAL] = rxdesc_phy % (2^32)
+      regs[RDBAH] = math.floor(rxdesc_phy / (2^32)) --note: bitop supports only 32-bit operations :-( 
+
+      --regs[RDBAL] = bit.band(rxdesc_phy, 0xffffffff)
+      --regs[RDBAH] = 0 --note: bitop supports only 32-bit operations :-( 
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
@@ -344,8 +354,17 @@ function new (pciaddress)
        ********************************/
 
          struct tx_context_desc {
-             uint64_t block0;
-             uint64_t block1;
+             uint16_t tucse;
+             uint8_t  tucso;
+             uint8_t  tucss;
+             uint16_t ipcse;
+             uint8_t  ipcso;
+             uint8_t  ipcss;
+
+             uint16_t mss;
+             uint8_t  hdrlen;
+             uint8_t  rsv_sta;
+             uint32_t tucmd_dtype_paylen;
          } __attribute__((packed));
 
          union tx {
@@ -367,8 +386,14 @@ function new (pciaddress)
    end
 
    function init_transmit_ring ()
-      regs[TDBAL] = bit.band(txdesc_phy, 0xffffffff)
-      regs[TDBAH] = 0
+      print("DBG: txdesc_phy = ")
+      print(txdesc_phy) --lower 32 bits
+      print("DBG: TDBAL = "..tostring( txdesc_phy % (2^32) ))
+      print("DBG: TDBAH = "..tostring( (txdesc_phy / (2^32)) ))
+
+      regs[TDBAL] = txdesc_phy % (2^32)
+      regs[TDBAH] = math.floor(txdesc_phy / (2^32)) --note: bitop supports only 32-bit operations :-( 
+
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
@@ -448,19 +473,8 @@ function new (pciaddress)
       print("DBG: A plen_off = " .. bit.tohex(14 + plen_off) )
       print("DBG: A prot_off = " .. bit.tohex(14 + prot_off) )
 
-      print("DBG: pl -2 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off - 2, 1))[0]))
-      print("DBG: pl -1 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off - 1, 1))[0]))
-      print("DBG: pl    = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off    , 1))[0]))
-      print("DBG: pl +1 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off + 1, 1))[0]))
-      print("DBG: pl +2 = " .. bit.tohex((protected("uint8_t", context, frame_len + plen_off + 2, 1))[0]))
-
-      print("DBG: [16]pl= " .. bit.tohex((protected("uint16_t", context, frame_len + plen_off    , 1)[0])))
-
-      print("DBG: context = " .. tostring(ffi.cast("uint32_t",context)) )
-      print("DBG: context + frame_len + plen_off = " .. tostring(ffi.cast("uint32_t",context) + frame_len + plen_off) )
-      print("DBG: context + frame_len + plen_off + 1 = " .. tostring(ffi.cast("uint32_t",context) + frame_len + plen_off + 1) )
-
-      local pkt_len = (protected("uint16_t", context, frame_len + plen_off + 1, 1))[0]
+      local pl = protected("uint8_t", context, frame_len + plen_off, 2)
+      local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
       print("DBG: pkt_len = " .. bit.tohex(pkt_len))
 
       ctx.ipcss = frame_len     
@@ -491,21 +505,25 @@ function new (pciaddress)
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
 
-      pkt_len = 0 --reset IP packet length
+      pl[0], pl[1] = 0, 0 --reset IP packet length
 
-      txdesc[tdt].ctx.block0 = bit.bor( bit.lshift(ctx.tucse,  48),
-                                        bit.lshift(ctx.tucso,  40),
-                                        bit.lshift(ctx.tucss,  32),
-                                        bit.lshift(ctx.ipcse,  16),
-                                        bit.lshift(ctx.ipcso,   8),
-                                        bit.lshift(ctx.ipcss,   0) )
+      assert(pl[0] == 0)
+      assert(pl[1] == 0)
+
+      txdesc[tdt].ctx.tucse = ctx.tucse
+      txdesc[tdt].ctx.tucso = ctx.tucso
+      txdesc[tdt].ctx.tucss = ctx.tucss
+      txdesc[tdt].ctx.ipcse = ctx.ipcse
+      txdesc[tdt].ctx.ipcso = ctx.ipcso
+      txdesc[tdt].ctx.ipcss = ctx.ipcss
+
+      txdesc[tdt].ctx.mss    = ctx.mss
+      txdesc[tdt].ctx.hdrlen = ctx.hdrlen
+      txdesc[tdt].ctx.rsv_sta = ctx.sta
       
-      txdesc[tdt].ctx.block1 = bit.bor( bit.lshift(ctx.mss,    48),
-                                        bit.lshift(ctx.hdrlen, 40),
-                                        bit.lshift(ctx.sta,    32),
-                                        bit.lshift(ctx.tucmd,  24),
-                                        bit.lshift(ctx.dtype,  20),
-                                        bit.lshift(ctx.paylen,  0) )
+      txdesc[tdt].ctx.tucmd_dtype_paylen = bit.bor( bit.lshift(ctx.tucmd,  24),
+                                                    bit.lshift(ctx.dtype,  20),
+                                                    bit.lshift(ctx.paylen,  0) )
 
       tdt = (tdt + 1) % num_descriptors
       M.add_txbuf(address, size) --write data descriptor
@@ -762,6 +780,19 @@ function new (pciaddress)
                     0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
+
+    buffers[0] = 0x7f
+    buffers[1] = 0x80
+    buffers[2] = 0x81
+    buffers[3] = 0x82
+
+    local pl = protected("uint8_t", buffers._ptr, 1, 2)
+    local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
+    print("DBG: 16+1 pkt_len = ".. bit.tohex(pkt_len).."\n")
+
+    print("DBG: 16+0 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 0, 1)[0])))
+    print("DBG: 16+1 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 1, 1)[0])))
+    print("DBG: 16+2 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 2, 1)[0])))
 
     for i = 0, 57, 1 do
         buffers[i] = packet[i+1]
