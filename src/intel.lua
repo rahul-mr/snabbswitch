@@ -229,6 +229,11 @@ function new (pciaddress)
             struct rx_desc data;
             struct rx_desc_wb wb;
          } __attribute__((packed));
+
+         typedef struct{
+            uint32_t lower32;
+            uint32_t upper32;
+        } __attribute__((packed)) generic64;
    ]]
 
    local rxnext = 0
@@ -247,8 +252,16 @@ function new (pciaddress)
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
       regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
-      regs[RDBAL] = bit.band(rxdesc_phy, 0xffffffff)
-      regs[RDBAH] = 0
+
+      rxdesc_phy = ffi.new("generic64", rxdesc_phy)
+      print("DBG: RDBAL = "..bit.tohex( rxdesc_phy.lower32 ) )
+      print("DBG: RDBAH = "..bit.tohex( rxdesc_phy.upper32 ) )
+
+      regs[RDBAL] = rxdesc_phy.lower32
+      regs[RDBAH] = rxdesc_phy.upper32 --note: bitop supports only 32-bit operations :-( 
+
+      --regs[RDBAL] = bit.band(rxdesc_phy, 0xffffffff)
+      --regs[RDBAH] = 0
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
@@ -358,8 +371,15 @@ function new (pciaddress)
    end
 
    function init_transmit_ring ()
-      regs[TDBAL] = bit.band(txdesc_phy, 0xffffffff)
-      regs[TDBAH] = 0
+      txdesc_phy = ffi.new("generic64", txdesc_phy)
+      print("DBG: TDBAL = "..bit.tohex( txdesc_phy.lower32 ) )
+      print("DBG: TDBAH = "..bit.tohex( txdesc_phy.upper32 ) )
+
+      regs[TDBAL] = txdesc_phy.lower32
+      regs[TDBAH] = txdesc_phy.upper32 --note: bitop supports only 32-bit operations :-( 
+
+      --regs[TDBAL] = bit.band(txdesc_phy, 0xffffffff)
+      --regs[TDBAH] = 0
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
