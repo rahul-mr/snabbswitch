@@ -246,6 +246,7 @@ function new (pciaddress)
 
    local rxnext = 0
    local rxbuffers = {}
+   local rdt = 0
 
    function init_receive ()
       -- Disable RX and program all the registers
@@ -268,11 +269,10 @@ function new (pciaddress)
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
+      rdt = 0
       -- Enable RX
       regs[RCTL] = bit.bor(regs[RCTL], bits{EN=1})
    end
-
-   local rdt = 0
 
    -- Enqueue a receive descriptor to receive a packet.
    local function add_rxbuf (address)
@@ -379,6 +379,11 @@ function new (pciaddress)
          };
    ]]
 
+   -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
+   -- Updates are kept locally here until flush_tx() is called.
+   -- That's because updating the hardware register is relatively expensive.
+   local tdt = 0
+
    function init_transmit ()
       regs[TCTL]        = 0x3103f0f8
       regs[TXDCTL]      = 0x01410000
@@ -389,6 +394,7 @@ function new (pciaddress)
       regs[TDT] = 0
       regs[TXDCTL]      = 0x01410000
       regs[TCTL]        = 0x3103f0fa
+      tdt = 0
    end
 
    function init_transmit_ring ()
@@ -402,10 +408,6 @@ function new (pciaddress)
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
    end
 
-   -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
-   -- Updates are kept locally here until flush_tx() is called.
-   -- That's because updating the hardware register is relatively expensive.
-   local tdt = 0
 
    -- Flags for transmit descriptors.
    local txdesc_flags = bits({dtype=20, eop=24, ifcs=25, dext=29})
