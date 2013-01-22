@@ -472,7 +472,7 @@ function new (pciaddress)
         hdr_len = 4 * bit.band(mem[0], 0x0f) --IHL field
         plen_off = 2
         prot_off = 9
-        ctx.ipcse = frame_len + hdrlen
+        ctx.ipcse = frame_len + hdr_len
       else --ver == 0x60 --IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
         hdr_len  = 40
@@ -490,7 +490,6 @@ function new (pciaddress)
       ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
       ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
 
-      ctx.paylen = pkt_len - hdr_len 
 
       print("DBG: ctx.paylen = ".. bit.tohex(ctx.paylen))
 
@@ -503,13 +502,17 @@ function new (pciaddress)
         local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
         print("DBG: data_off = " .. bit.tohex(data_off))
         ctx.hdrlen = frame_len + hdr_len + data_off * 4
+        ctx.paylen = pkt_len - hdr_len - data_off * 4
 
       elseif mem[prot_off] == 0x11 then --UDP specific
         ctx.tucso = frame_len + hdr_len + 6 --UDP checksum offset
         ctx.hdrlen = frame_len + hdr_len + 6 + 2
+        ctx.paylen = pkt_len - hdr_len - ( 6 + 2 )
+
       else
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
+
 
       pl[0], pl[1] = 0, 0 --reset IP packet length
 
@@ -530,6 +533,25 @@ function new (pciaddress)
       txdesc[tdt].ctx.tucmd_dtype_paylen = bit.bor( bit.lshift(ctx.tucmd,  24),
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
+
+      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)))
+      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)))
+      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)))
+      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)))
+      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)))
+      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)))
+                                      
+      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)))
+      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)))
+      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)))
+                  
+      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)))
+      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)))
+      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)))
+
+
+      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 
       tdt = (tdt + 1) % num_descriptors
       M.add_txbuf(address, size) --write data descriptor
@@ -795,18 +817,18 @@ function new (pciaddress)
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
 
     local tctx = protected("struct tx_context_desc", buffers._ptr, 0, 1)
-      tctx[0].tucse = 0x5555
-      tctx[0].tucso = 0x44
-      tctx[0].tucss = 0x33
-      tctx[0].ipcse = 0x2222
-      tctx[0].ipcso = 0x11
-      tctx[0].ipcss = 0x00
+      tctx[0].tucse = 0x5432
+      tctx[0].tucso = 0x10
+      tctx[0].tucss = 0x98
+      tctx[0].ipcse = 0x7654
+      tctx[0].ipcso = 0x32
+      tctx[0].ipcss = 0x10
 
-      tctx[0].mss    = 0x9999
-      tctx[0].hdrlen = 0x88
-      tctx[0].rsv_sta = 0x77
+      tctx[0].mss    = 0x1098
+      tctx[0].hdrlen = 0x76
+      tctx[0].rsv_sta = 0x54
 
-      tctx[0].tucmd_dtype_paylen = 0x66666666
+      tctx[0].tucmd_dtype_paylen = 0x3210dcba
                                                                
       tctx = protected("uint64_t", buffers._ptr, 0, 2)
       print("(64) tctx[0] = " .. bit.tohex( tonumber(tctx[0] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[0] % (2^32)) ) )
@@ -836,8 +858,8 @@ function new (pciaddress)
       --print (buffers[i])
     end
 
-    M.add_txbuf(buffers_phy, 58)
-    --M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
+    --M.add_txbuf(buffers_phy, 58)
+    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
     M.flush_tx()
     M.tx_diagnostics()
    end

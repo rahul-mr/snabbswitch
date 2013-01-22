@@ -11,7 +11,7 @@ PATH := ../deps/luajit/usr/local/bin:$(PATH)
 all: snabbswitch
 
 snabbswitch: $(LUAOBJ) $(HOBJ) $(COBJ)
-	gcc -Wl,-E -Werror -Wall -o $@ $^ \
+	gcc -Wl,-E -Werror -Wall -g -o $@ $^ \
 	    ../deps/luafilesystem/src/lfs.o \
 	    ../deps/luajit/src/libluajit.a \
 	    -lc -ldl -lm -lrt
@@ -22,7 +22,7 @@ $(LUAOBJ): obj/%.o: %.lua
 	luajit -bg $< $@
 
 $(COBJ): obj/%.o: %.c $(CHDR)
-	gcc -Wl,-E -I ../deps/luajit/src -c -Wall -Werror -o $@ $<
+	gcc -Wl,-E -I ../deps/luajit/src -c -Wall -Werror -g -o $@ $<
 
 $(HOBJ): obj/%_h.o: %.h
 	@echo Generating $(basename $@).lua from $< - $(basename $@)
