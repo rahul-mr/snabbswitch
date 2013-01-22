@@ -11,7 +11,7 @@ local C = ffi.C
 --- allocations.
 
 -- Current chunk: pointer, physical address, remaining size.
-local chunk_ptr, chunk_phys, chunk_size
+local chunk_ptr, chunk_phy, chunk_size = nil, nil, 0
 
 -- Install a new chunk of memory at a specific physical memory address.
 -- Mostly useful if you have reserved memory using 'linux memmap=16M$0x10000000'
@@ -32,6 +32,11 @@ end
 
 --- DMA is allocated from the current chunk, which is replaced once it
 --- becomes too small.
+
+function dma_alloc2 (size)
+     install(0x10000000 + chunk_size, size)
+     return chunk_ptr, chunk_phy, chunk_size
+end
 
 -- Allocate physically contiguous memory that is suitable for DMA.
 -- Returns three values when successful:
