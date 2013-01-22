@@ -92,6 +92,18 @@ function new (pciaddress)
    local MDIC   = 0x00020 / 4 -- MDI Control Register (RW)
    local EXTCNF_CTRL = 0x00F00 / 4 -- Extended Configuration Control (RW)
    local POEMB  = 0x00F10 / 4 -- PHY OEM Bits Register (RW)
+   local RDFH   = 0x02410 / 4 -- Receive Data FIFO Head Register (RW)
+   local RDFT   = 0x02418 / 4 -- Receive Data FIFO Tail Register (RW)
+   local RDFHS  = 0x02420 / 4 -- Receive Data FIFO Head Saved Register (RW)
+   local RDFTS  = 0x02428 / 4 -- Receive Data FIFO Tail Saved Register (RW)
+   local RDFPC  = 0x02430 / 4 -- Receive Data FIFO Packet Count (RW)
+   local TDFH   = 0x03410 / 4 -- Transmit Data FIFO Head Register (RW)
+   local TDFT   = 0x03418 / 4 -- Transmit Data FIFO Tail Register (RW)
+   local TDFHS  = 0x03420 / 4 -- Transmit Data FIFO Head Saved Register (RW)
+   local TDFTS  = 0x03428 / 4 -- Transmit Data FIFO Tail Saved Register (RW)
+   local TDFPC  = 0x03430 / 4 -- Transmit Data FIFO Packet Count (RW)
+   local PBM    = 0x10000 / 4 -- Packet Buffer Memory (RW)
+   local PBS    = 0x01008 / 4 -- Packet Buffer Size (RW)
    local ICR    = 0x000C0 / 4 -- Interrupt Cause Register (RW)
 
    local regs = ffi.cast("uint32_t *", pci.map_pci_memory(pciaddress, 0))
@@ -409,6 +421,16 @@ function new (pciaddress)
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
 
+   local function tx_diagnostics()
+      print ("DBG: regs[TDFH]  = "..bit.tohex(regs[TDFH]))
+      print ("DBG: regs[TDFT]  = "..bit.tohex(regs[TDFT]))
+      print ("DBG: regs[TDFHS] = "..bit.tohex(regs[TDFHS]))
+      print ("DBG: regs[TDFTS] = "..bit.tohex(regs[TDFTS]))
+      print ("DBG: regs[TDFPC] = "..bit.tohex(regs[TDFPC]))
+      print ("DBG: regs[PBM]   = "..bit.tohex(regs[PBM]))
+      print ("DBG: regs[PBS]   = "..bit.tohex(regs[PBS]))
+   end M.tx_diagnostics = tx_diagnostics
+
    local function add_txbuf_tso (address, size, mss, context)
       --ui_tdt = ffi.cast("uint32_t", tdt)
       --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
@@ -447,6 +469,7 @@ function new (pciaddress)
         hdr_len = 4 * bit.band(mem[0], 0x0f) --IHL field
         plen_off = 2
         prot_off = 9
+        ctx.ipcse = frame_len + hdrlen
       else --ver == 0x60 --IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
         hdr_len  = 40
@@ -454,23 +477,12 @@ function new (pciaddress)
         prot_off = 6 
       end --ver
 
-      assert(ipcs_off ~= -1, "ipcs_off not set")
-      assert(hdr_len  ~= -1, "hdr_len not set")
-      assert(plen_off ~= -1, "plen_off not set")
-      assert(prot_off ~= -1, "prot_off not set")
-
-      print("DBG: A ipcs_off = " .. bit.tohex(14 + ipcs_off) )
-      print("DBG: A hdr_len  = " .. bit.tohex(14 + hdr_len) )
-      print("DBG: A plen_off = " .. bit.tohex(14 + plen_off) )
-      print("DBG: A prot_off = " .. bit.tohex(14 + prot_off) )
-
       local pl = protected("uint8_t", context, frame_len + plen_off, 2)
       local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
       print("DBG: pkt_len = " .. bit.tohex(pkt_len))
 
       ctx.ipcss = frame_len     
       ctx.ipcso = frame_len + ipcs_off
-      ctx.ipcse = 0 -- (Note: EOP flag must be set)
 
       ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
       ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
@@ -738,10 +750,15 @@ function new (pciaddress)
 
       print "waiting for old traffic to die out ..."
       C.usleep(100000) -- Wait for old traffic from previous tests to die out
+
+      test.waitfor("linkup", M.linkup, 20, 250000)
+
       M.update_stats()
       local txhardware_start = M.stats.GPTC
       M.print_stats()
-      M.print_status()
+      --M.print_status()
+
+      M.tx_diagnostics()
 
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
@@ -752,9 +769,9 @@ function new (pciaddress)
       -- Wait a safe time and check hardware count
       C.usleep(100000) -- wait for transmit
       M.update_stats()
-      local txhardware = txhardware_start - M.stats.GPTC
+      local txhardware = M.stats.GPTC - txhardware_start 
       M.print_stats()
-      M.print_status()
+      --M.print_status()
 
       -- Check results
       print("size", "mss", "txtcp", "txeth", "txhw")
@@ -762,6 +779,8 @@ function new (pciaddress)
       if txeth ~= txhardware then
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
+
+      M.tx_diagnostics()
    end
 
    function M.add_tso_test_buffer (size, mss)
@@ -772,26 +791,28 @@ function new (pciaddress)
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
 
-    buffers[0] = 0x7f
-    buffers[1] = 0x80
-    buffers[2] = 0x81
-    buffers[3] = 0x82
-
-    local pl = protected("uint8_t", buffers._ptr, 1, 2)
-    local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
-    print("DBG: 16+1 pkt_len = ".. bit.tohex(pkt_len).."\n")
-
-    print("DBG: 16+0 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 0, 1)[0])))
-    print("DBG: 16+1 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 1, 1)[0])))
-    print("DBG: 16+2 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 2, 1)[0])))
-
+--    buffers[0] = 0x7f
+--    buffers[1] = 0x80
+--    buffers[2] = 0x81
+--    buffers[3] = 0x82
+--
+--    local pl = protected("uint8_t", buffers._ptr, 1, 2)
+--    local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
+--    print("DBG: 16+1 pkt_len = ".. bit.tohex(pkt_len).."\n")
+--
+--    print("DBG: 16+0 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 0, 1)[0])))
+--    print("DBG: 16+1 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 1, 1)[0])))
+--    print("DBG: 16+2 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 2, 1)[0])))
+--
     for i = 0, 57, 1 do
         buffers[i] = packet[i+1]
       --print (buffers[i])
     end
 
-    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
+    M.add_txbuf(buffers_phy, 58)
+    --M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
     M.flush_tx()
+    M.tx_diagnostics()
    end
 
    return M
