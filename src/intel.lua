@@ -534,20 +534,20 @@ function new (pciaddress)
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
 
-      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)))
-      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)))
-      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)))
-      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)))
-      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)))
-      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)))
+      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
+      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
+      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
+      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
+      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
+      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
                                       
-      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)))
-      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)))
-      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)))
+      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
+      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
+      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
                   
-      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)))
-      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)))
-      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)))
+      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
+      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
+      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
 
 
       print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
