@@ -360,17 +360,18 @@ function new (pciaddress)
        ********************************/
 
          struct tx_context_desc {
-             uint16_t tucse;
-             uint8_t  tucso;
-             uint8_t  tucss;
-             uint16_t ipcse;
-             uint8_t  ipcso;
              uint8_t  ipcss;
+             uint8_t  ipcso;
+             uint16_t ipcse;
+             uint8_t  tucss;
+             uint8_t  tucso;
+             uint16_t tucse;
 
-             uint16_t mss;
-             uint8_t  hdrlen;
-             uint8_t  rsv_sta;
              uint32_t tucmd_dtype_paylen;
+             uint8_t  rsv_sta;
+             uint8_t  hdrlen;
+             uint16_t mss;
+
          } __attribute__((packed));
 
          union tx {
@@ -792,6 +793,30 @@ function new (pciaddress)
                     0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                     0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                     0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
+
+    local tctx = protected("struct tx_context_desc", buffers._ptr, 0, 1)
+      tctx[0].tucse = 0x5555
+      tctx[0].tucso = 0x44
+      tctx[0].tucss = 0x33
+      tctx[0].ipcse = 0x2222
+      tctx[0].ipcso = 0x11
+      tctx[0].ipcss = 0x00
+
+      tctx[0].mss    = 0x9999
+      tctx[0].hdrlen = 0x88
+      tctx[0].rsv_sta = 0x77
+
+      tctx[0].tucmd_dtype_paylen = 0x66666666
+                                                               
+      tctx = protected("uint64_t", buffers._ptr, 0, 2)
+      print("(64) tctx[0] = " .. bit.tohex( tonumber(tctx[0] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[0] % (2^32)) ) )
+      print("(64) tctx[1] = " .. bit.tohex( tonumber(tctx[1] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[1] % (2^32)) ) )
+
+      tctx = protected("uint32_t", buffers._ptr, 0, 4)
+      print("(32) tctx[0] = " .. bit.tohex( tonumber(tctx[0]) ) ) 
+      print("(32) tctx[1] = " .. bit.tohex( tonumber(tctx[1]) ) ) 
+      print("(32) tctx[2] = " .. bit.tohex( tonumber(tctx[2]) ) ) 
+      print("(32) tctx[3] = " .. bit.tohex( tonumber(tctx[3]) ) ) 
 
 --    buffers[0] = 0x7f
 --    buffers[1] = 0x80
