@@ -434,6 +434,7 @@ function new (pciaddress)
       print ("DBG: regs[PBS]   = "..bit.tohex(regs[PBS]))
    end M.tx_diagnostics = tx_diagnostics
 
+   --assumes given mss = header + TCP/UDP payload size (so 1500 for tcp = 54 header + 1446 payload )
    local function add_txbuf_tso (address, size, mss, context)
       --ui_tdt = ffi.cast("uint32_t", tdt)
       --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
@@ -444,7 +445,7 @@ function new (pciaddress)
       ctx.ipcse  = 0    --IP CheckSum End
       ctx.ipcso  = 0    --IP CheckSum Offset
       ctx.ipcss  = 0    --IP CheckSum Start
-      ctx.mss    = mss  --Maximum Segment Size (1440)
+      ctx.mss    = 0    --Maximum Segment Size (1440)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
       ctx.tucmd  = bits({dext=5, tse=2}) --Command --dext: ctxt desc fmt ; tse: TCP Segmentation Enable
@@ -490,11 +491,6 @@ function new (pciaddress)
       ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
       ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
 
-
-      print("DBG: ctx.paylen = ".. bit.tohex(ctx.paylen))
-
-      print("DBG: mem[proto_off] = " .. bit.tohex(mem[prot_off]))
-
       if mem[prot_off] == 0x06 then -- TCP specific
         ctx.tucso = frame_len + hdr_len + 16 --TCP checksum offset
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
@@ -513,11 +509,8 @@ function new (pciaddress)
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
 
-
+      ctx.mss = mss - ctx.hdrlen -- maximum tcp/udp payload segment size (not incl headers)
       pl[0], pl[1] = 0, 0 --reset IP packet length
-
-      assert(pl[0] == 0)
-      assert(pl[1] == 0)
 
       txdesc[tdt].ctx.tucse = ctx.tucse
       txdesc[tdt].ctx.tucso = ctx.tucso
@@ -548,7 +541,6 @@ function new (pciaddress)
       print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
       print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
       print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
-
 
       print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
       print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
