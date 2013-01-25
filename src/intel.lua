@@ -20,6 +20,81 @@ local bits, bitset = lib.bits, lib.bitset
 require("clib_h")
 require("snabb_h")
 
+ffi.cdef[[
+         // RX descriptor written by software.
+         struct rx_desc {
+            uint64_t address;    // 64-bit address of receive buffer
+            uint64_t dd;         // low bit must be 0, otherwise reserved
+         } __attribute__((packed));
+
+         // RX writeback descriptor written by hardware.
+         struct rx_desc_wb {
+            // uint32_t rss;
+            uint16_t checksum;
+            uint16_t id;
+            uint32_t mrq;
+            uint32_t status;
+            uint16_t length;
+            uint16_t vlan;
+         } __attribute__((packed));
+
+         union rx {
+            struct rx_desc data;
+            struct rx_desc_wb wb;
+         } __attribute__((packed));
+
+   ]]
+
+ffi.cdef[[
+         // TX Extended Data Descriptor written by software.
+         struct tx_desc {
+            uint64_t address;
+            uint64_t options;
+         } __attribute__((packed));
+
+
+       /********************************
+        * Not used (only for reference)
+        ********************************
+         struct tx_context_desc {
+            unsigned int tucse:16,
+                         tucso:8,
+                         tucss:8,
+                         ipcse:16,
+                         ipcso:8,
+                         ipcss:8,
+                         mss:16,
+                         hdrlen:8,
+                         rsv:2,
+                         sta:4,
+                         tucmd:8,
+                         dtype:4,
+                         paylen:20;
+         } __attribute__((packed));
+       ********************************/
+
+         struct tx_context_desc {
+             uint8_t  ipcss;
+             uint8_t  ipcso;
+             uint16_t ipcse;
+             uint8_t  tucss;
+             uint8_t  tucso;
+             uint16_t tucse;
+
+             uint32_t tucmd_dtype_paylen;
+             uint8_t  rsv_sta;
+             uint8_t  hdrlen;
+             uint16_t mss;
+
+         } __attribute__((packed));
+
+         union tx {
+            struct tx_desc data;
+            struct tx_context_desc ctx;
+         };
+   ]]
+
+
 function new (pciaddress)
 
    -- Method dictionary for Intel NIC objects.
@@ -122,7 +197,12 @@ function new (pciaddress)
 
    function reset ()
       regs[IMC] = 0xffffffff                 -- Disable interrupts
-      regs[CTRL] = bits({FD=0,SLU=6,RST=26}) -- Global reset
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      --local deadline = C.get_time_ns() + 
+      C.usleep(1000) -- wait 1ms 
+      print("DBG: reset: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
+      --regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
+      regs[CTRL] = bits({FD=0,SLU=6,RST=26,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0xffffffff                 -- Disable interrupts
    end
@@ -219,31 +299,7 @@ function new (pciaddress)
 
    -- Receive functionality
 
-   ffi.cdef[[
-         // RX descriptor written by software.
-         struct rx_desc {
-            uint64_t address;    // 64-bit address of receive buffer
-            uint64_t dd;         // low bit must be 0, otherwise reserved
-         } __attribute__((packed));
-
-         // RX writeback descriptor written by hardware.
-         struct rx_desc_wb {
-            // uint32_t rss;
-            uint16_t checksum;
-            uint16_t id;
-            uint32_t mrq;
-            uint32_t status;
-            uint16_t length;
-            uint16_t vlan;
-         } __attribute__((packed));
-
-         union rx {
-            struct rx_desc data;
-            struct rx_desc_wb wb;
-         } __attribute__((packed));
-
-   ]]
-
+   
    local rxnext = 0
    local rxbuffers = {}
    local rdt = 0
@@ -303,7 +359,7 @@ function new (pciaddress)
    end
 
    local function rx_pending ()
-      return ring_pending(regs[RDT], regs[RDH])
+      return ring_pending(regs[RDH], regs[RDT])
    end M.rx_pending = rx_pending
 
    local function rx_available ()
@@ -331,56 +387,7 @@ function new (pciaddress)
 
    -- Transmit functionality
 
-   ffi.cdef[[
-         // TX Extended Data Descriptor written by software.
-         struct tx_desc {
-            uint64_t address;
-            uint64_t options;
-         } __attribute__((packed));
-
-
-       /********************************
-        * Not used (only for reference)
-        ********************************
-         struct tx_context_desc {
-            unsigned int tucse:16,
-                         tucso:8,
-                         tucss:8,
-                         ipcse:16,
-                         ipcso:8,
-                         ipcss:8,
-                         mss:16,
-                         hdrlen:8,
-                         rsv:2,
-                         sta:4,
-                         tucmd:8,
-                         dtype:4,
-                         paylen:20;
-         } __attribute__((packed));
-       ********************************/
-
-         struct tx_context_desc {
-             uint8_t  ipcss;
-             uint8_t  ipcso;
-             uint16_t ipcse;
-             uint8_t  tucss;
-             uint8_t  tucso;
-             uint16_t tucse;
-
-             uint32_t tucmd_dtype_paylen;
-             uint8_t  rsv_sta;
-             uint8_t  hdrlen;
-             uint16_t mss;
-
-         } __attribute__((packed));
-
-         union tx {
-            struct tx_desc data;
-            struct tx_context_desc ctx;
-         };
-   ]]
-
-   -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
+      -- Locally cached copy of the Transmit Descriptor Tail (TDT) register.
    -- Updates are kept locally here until flush_tx() is called.
    -- That's because updating the hardware register is relatively expensive.
    local tdt = 0
@@ -423,6 +430,12 @@ function new (pciaddress)
    local function flush_tx()
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
+
+   local function clear_tx()
+      tdt = 0
+      regs[TDT] = 0
+      regs[TDH] = 0
+   end M.clear_tx = clear_tx
 
    local function tx_diagnostics()
       print ("DBG: regs[TDFH]  = "..bit.tohex(regs[TDFH]))
@@ -785,6 +798,8 @@ function new (pciaddress)
       print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
       C.usleep(100000) -- wait for transmit
+      M.clear_tx()
+      C.usleep(100000) -- wait for transmit
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
       M.print_stats()
@@ -797,7 +812,8 @@ function new (pciaddress)
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
 
-      M.tx_diagnostics()
+      --M.tx_diagnostics()
+      --M.init()
    end
 
    function M.add_tso_test_buffer (size, mss)
