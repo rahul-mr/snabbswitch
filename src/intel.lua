@@ -559,7 +559,11 @@ function new (pciaddress)
       print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 
       tdt = (tdt + 1) % num_descriptors
-      M.add_txbuf(address, size) --write data descriptor
+      --M.add_txbuf(address, size) --write data descriptor (won't work)
+      txdesc[tdt].data.address = address
+      txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+      tdt = (tdt + 1) % num_descriptors
+
    end M.add_txbuf_tso = add_txbuf_tso
  
    function M.tx_full  () return M.tx_pending() == num_descriptors - 1 end
