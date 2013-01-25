@@ -778,6 +778,12 @@ function new (pciaddress)
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
+      if options.loopback then
+         M.enable_mac_loopback()
+      end
+
+      local receive = options.receive or false
+
       print "waiting for old traffic to die out ..."
       C.usleep(100000) -- Wait for old traffic from previous tests to die out
 
@@ -788,6 +794,14 @@ function new (pciaddress)
       M.print_stats()
       --M.print_status()
       --M.tx_diagnostics()
+     
+      if receive then
+         print "adding receive buffers..."
+         for i = 1, rx_available() do
+            add_rxbuf(buffers_phy + 8192) --shouldn't overlap with tx's buffer ;-)
+         end
+         flush_rx()
+      end
 
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.

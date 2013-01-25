@@ -33,6 +33,10 @@ for _,device in ipairs(pci.suitable_devices()) do
    nic.init()
    nic.reset_stats()
    nic.selftest_tso({size=4096, mss=1500})
+   print "NIC transmit+receive loopback tso test - size=4096, mss=1500"
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({size=4096, mss=1500, loopback=true, receive=true})
    -- nic.selftest({packets=10000000})
 end
 
