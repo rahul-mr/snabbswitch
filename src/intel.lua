@@ -344,6 +344,12 @@ function new (pciaddress)
       regs[RDT] = rdt
    end M.flush_rx = flush_rx
 
+   local function clear_rx()
+      rdt = 0
+      regs[RDT] = 0
+      regs[RDH] = 0
+   end M.clear_rx = clear_rx
+
    local function ring_pending(head, tail)
       if head == tail then return 0 end
       if head <  tail then return tail - head
@@ -826,9 +832,11 @@ function new (pciaddress)
       
       print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
-      C.usleep(1000000) -- wait for transmit
-      --M.clear_tx()
-      --C.usleep(100000) -- wait for transmit
+      C.usleep(1000000) -- wait for 1s transmit
+      M.clear_tx()
+      C.usleep(1000) -- wait for 1 ms
+      M.clear_rx()
+      C.usleep(1000) -- wait for 1 ms
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
       M.print_stats()
