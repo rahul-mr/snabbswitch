@@ -787,8 +787,7 @@ function new (pciaddress)
       local txhardware_start = M.stats.GPTC
       M.print_stats()
       --M.print_status()
-
-      M.tx_diagnostics()
+      --M.tx_diagnostics()
 
       print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
@@ -797,9 +796,9 @@ function new (pciaddress)
       
       print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
-      C.usleep(100000) -- wait for transmit
-      M.clear_tx()
-      C.usleep(100000) -- wait for transmit
+      C.usleep(1000000) -- wait for transmit
+      --M.clear_tx()
+      --C.usleep(100000) -- wait for transmit
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
       M.print_stats()
@@ -818,36 +817,51 @@ function new (pciaddress)
 
    function M.add_tso_test_buffer (size, mss)
       -- Construct a TCP packet of 'size' total bytes and transmit with TSO.
-    --simple tcp/ip packet with payload data = "asdf" (size=4)
-    local packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
-                    0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
-                    0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
-                    0x20, 0x00, 0xCB, 0x9E, 0x00, 0x00, 0x61, 0x73, 0x64, 0x66}
+    
+    local packet = nil --packet headers only
+    local hdr_len = 54 
 
-    local tctx = protected("struct tx_context_desc", buffers._ptr, 0, 1)
-      tctx[0].tucse = 0x5432
-      tctx[0].tucso = 0x10
-      tctx[0].tucss = 0x98
-      tctx[0].ipcse = 0x7654
-      tctx[0].ipcso = 0x32
-      tctx[0].ipcss = 0x10
+    if size == 4 then
+      --simple tcp/ip packet header with payload data = "AAAA" (size=4)
+      packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
+                0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
+                0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
+                0x20, 0x00, 0x0E, 0xF6, 0x00, 0x00}
+      
+    elseif size == 4096 then
+      packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00, 
+                0x10, 0x28, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x6C, 0xCD, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
+                0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
+                0x20, 0x00, 0x77, 0x72, 0x00, 0x00}
 
-      tctx[0].mss    = 0x1098
-      tctx[0].hdrlen = 0x76
-      tctx[0].rsv_sta = 0x54
+    else
+      assert(false, "Not Implemented for given size ;-)")
+    end
 
-      tctx[0].tucmd_dtype_paylen = 0x3210dcba
-                                                               
-      tctx = protected("uint64_t", buffers._ptr, 0, 2)
-      print("(64) tctx[0] = " .. bit.tohex( tonumber(tctx[0] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[0] % (2^32)) ) )
-      print("(64) tctx[1] = " .. bit.tohex( tonumber(tctx[1] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[1] % (2^32)) ) )
-
-      tctx = protected("uint32_t", buffers._ptr, 0, 4)
-      print("(32) tctx[0] = " .. bit.tohex( tonumber(tctx[0]) ) ) 
-      print("(32) tctx[1] = " .. bit.tohex( tonumber(tctx[1]) ) ) 
-      print("(32) tctx[2] = " .. bit.tohex( tonumber(tctx[2]) ) ) 
-      print("(32) tctx[3] = " .. bit.tohex( tonumber(tctx[3]) ) ) 
-
+--    local tctx = protected("struct tx_context_desc", buffers._ptr, 0, 1)
+--      tctx[0].tucse = 0x5432
+--      tctx[0].tucso = 0x10
+--      tctx[0].tucss = 0x98
+--      tctx[0].ipcse = 0x7654
+--      tctx[0].ipcso = 0x32
+--      tctx[0].ipcss = 0x10
+--
+--      tctx[0].mss    = 0x1098
+--      tctx[0].hdrlen = 0x76
+--      tctx[0].rsv_sta = 0x54
+--
+--      tctx[0].tucmd_dtype_paylen = 0x3210dcba
+--                                                               
+--      tctx = protected("uint64_t", buffers._ptr, 0, 2)
+--      print("(64) tctx[0] = " .. bit.tohex( tonumber(tctx[0] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[0] % (2^32)) ) )
+--      print("(64) tctx[1] = " .. bit.tohex( tonumber(tctx[1] / (2^32)) ) .. " " .. bit.tohex( tonumber(tctx[1] % (2^32)) ) )
+--
+--      tctx = protected("uint32_t", buffers._ptr, 0, 4)
+--      print("(32) tctx[0] = " .. bit.tohex( tonumber(tctx[0]) ) ) 
+--      print("(32) tctx[1] = " .. bit.tohex( tonumber(tctx[1]) ) ) 
+--      print("(32) tctx[2] = " .. bit.tohex( tonumber(tctx[2]) ) ) 
+--      print("(32) tctx[3] = " .. bit.tohex( tonumber(tctx[3]) ) ) 
+--
 --    buffers[0] = 0x7f
 --    buffers[1] = 0x80
 --    buffers[2] = 0x81
@@ -861,13 +875,19 @@ function new (pciaddress)
 --    print("DBG: 16+1 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 1, 1)[0])))
 --    print("DBG: 16+2 buffer[0] = " .. bit.tohex((protected("uint16_t", buffers._ptr, 2, 1)[0])))
 --
-    for i = 0, 57, 1 do
+    --all headers
+    for i = 0, (hdr_len - 1), 1 do
         buffers[i] = packet[i+1]
       --print (buffers[i])
     end
 
+    --generate tcp/udp payload
+    for i = 0, (size-1), 1 do
+        buffers[hdr_len + i] = 41 --char 'A'
+    end
+
     --M.add_txbuf(buffers_phy, 58)
-    M.add_txbuf_tso(buffers_phy, 58, 1500, buffers._ptr)
+    M.add_txbuf_tso(buffers_phy, size + hdr_len, mss, buffers._ptr)
     M.flush_tx()
     M.tx_diagnostics()
    end
