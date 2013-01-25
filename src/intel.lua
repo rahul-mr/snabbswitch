@@ -561,7 +561,13 @@ function new (pciaddress)
       tdt = (tdt + 1) % num_descriptors
       --M.add_txbuf(address, size) --write data descriptor (won't work)
       txdesc[tdt].data.address = address
-      txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+      
+      if ctx.paylen < mss then --why did you even call this function :-P
+        txdesc[tdt].data.options = bit.bor(size, txdesc_flags)
+      else
+        txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+      end
+
       tdt = (tdt + 1) % num_descriptors
 
    end M.add_txbuf_tso = add_txbuf_tso
@@ -789,7 +795,13 @@ function new (pciaddress)
       local receive = options.receive or false
 
       print "waiting for old traffic to die out ..."
-      C.usleep(100000) -- Wait for old traffic from previous tests to die out
+      --C.usleep(100000) -- Wait for old traffic from previous tests to die out
+
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      --local deadline = C.get_time_ns() + 
+      C.usleep(10000) -- wait 10ms 
+      print("DBG: selftest_tso: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
+      regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
 
       test.waitfor("linkup", M.linkup, 20, 250000)
 
@@ -828,6 +840,12 @@ function new (pciaddress)
       if txeth ~= txhardware then
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
+
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      --local deadline = C.get_time_ns() + 
+      C.usleep(1000) -- wait 1ms 
+      print("DBG: selftest_tso: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
+      regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
 
       --M.tx_diagnostics()
       --M.init()
