@@ -155,6 +155,10 @@ function new (pciaddress)
    local SWSM   = 0x05B50  / 4 -- Software Semaphore (RW / 82571)
    local EEMNGCTL = 0x01010 / 4 -- MNG EEPROM Control (RW / 82571)
 
+   local EEC    = 0x00010 / 4 -- EEPROM/FLASH Control Register - EEC (RO) 
+   local EERD   = 0x00014 / 4 -- EEPROM Read Register - EERD (RW)
+
+
    local regs = ffi.cast("uint32_t *", pci.map_pci_memory(pciaddress, 0))
 
    -- Initialization
@@ -162,6 +166,35 @@ function new (pciaddress)
    function M.init ()
       reset()
       init_pci()
+
+      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
+      C.usleep(10)
+
+      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0B, 2) )
+      C.usleep(10)
+      print("DBG: reading (0x0B): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+
+      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
+      C.usleep(10)
+      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
+      C.usleep(10)
+
+      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0C, 2) )
+      C.usleep(10)
+      print("DBG: reading (0x0C): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+
+      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
+      C.usleep(10)
+      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
+      C.usleep(10)
+
+      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0D, 2) )
+      C.usleep(10)
+      print("DBG: reading (0x0D): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+
+      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
+      C.usleep(10)
+
       init_dma_memory()
       init_link()
       init_statistics()
@@ -171,11 +204,14 @@ function new (pciaddress)
 
    function reset ()
       regs[IMC] = 0xffffffff                 -- Disable interrupts
-      regs[CTRL] = bits({FD=0,SLU=6,RST=26}) -- Global reset
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      C.usleep(1000) -- wait 1ms to clear all pending requests
+      print("DBG: reset: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
+      regs[CTRL] = bits({FD=0,SLU=6,RST=26,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0xffffffff                 -- Disable interrupts
    end
-
+   
    function init_pci ()
       -- PCI bus mastering has to be enabled for DMA to work.
       pci_config_fd = pci.open_config(pciaddress)
