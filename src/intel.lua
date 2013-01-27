@@ -164,36 +164,70 @@ function new (pciaddress)
    -- Initialization
 
    function M.init ()
+
+--      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
+--      C.usleep(10)
+--
+--      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0B, 2) )
+--      C.usleep(10)
+--      print("DBG: reading (0x0B): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+--
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
+--      C.usleep(10^3)
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) --disable
+--      C.usleep(10^6)
+--      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) --enable 
+--      C.usleep(10^6)
+--
+--      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0F, 2) )
+--      C.usleep(10^6)
+--      print("DBG: reading ICW2 (0x0F): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+--
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) --disable
+--      C.usleep(10^6)
+--
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      C.usleep(10000) -- wait 10ms to clear all pending requests
+      regs[IMC] = 0xffffffff                 -- Disable interrupts
+      print("DBG: init: GIO Master Enable Status: ".. bit.tohex(regs[STATUS]) ) --GIO Master Enable Status 
+      local pc = io.open( pci.path(pciaddress) .. "/config", "r+b")
+      pc:seek("set", 0xCC)
+      pc:write("\x03")
+      pc:close()
+      C.usleep(10000)
+      pc = io.open( pci.path(pciaddress) .. "/config", "r+b")
+      pc:seek("set", 0xCC)
+      pc:write("\x00")
+      pc:close()
+      C.usleep(10000)
       reset()
       init_pci()
-
-      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
-      C.usleep(10)
-
-      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0B, 2) )
-      C.usleep(10)
-      print("DBG: reading (0x0B): regs[EERD] = ".. bit.tohex(regs[EERD]) )
-
-      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
-      C.usleep(10)
-      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
-      C.usleep(10)
-
-      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0C, 2) )
-      C.usleep(10)
-      print("DBG: reading (0x0C): regs[EERD] = ".. bit.tohex(regs[EERD]) )
-
-      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
-      C.usleep(10)
-      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
-      C.usleep(10)
-
-      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0D, 2) )
-      C.usleep(10)
-      print("DBG: reading (0x0D): regs[EERD] = ".. bit.tohex(regs[EERD]) )
-
-      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
-      C.usleep(10)
+--      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) --enable 
+--      C.usleep(10^6)
+--
+--      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0C, 2) )
+--      C.usleep(10^6)
+--      print("DBG: reading vendor id (0x0C): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+--
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) --disable
+--      C.usleep(10^6)
+--      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) --enable
+--      C.usleep(10^6)
+--
+--      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0D, 2) )
+--      C.usleep(10^6)
+--      print("DBG: reading device id (0x0D): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) 
+--      C.usleep(10)
+--      regs[EEC] = bit.bor( bits({ee_req=6}), regs[EEC]) 
+--      C.usleep(10)
+--
+--      regs[EERD] = bit.bor( 0x1 , bit.lshift(0x0D, 2) )
+--      C.usleep(10)
+--      print("DBG: reading (0x0D): regs[EERD] = ".. bit.tohex(regs[EERD]) )
+--
+--      regs[EEC] = bit.band( regs[EEC],  bit.bnot(bit.lshift(0x1, 6)) ) --disable
+--      C.usleep(10^6)
 
       init_dma_memory()
       init_link()
