@@ -197,14 +197,17 @@ function new (pciaddress)
 
    function reset ()
       regs[IMC] = 0xffffffff                 -- Disable interrupts
-      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
-      --local deadline = C.get_time_ns() + 
-      C.usleep(1000) -- wait 1ms 
-      print("DBG: reset: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
-      --regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
+      pcie_master_reset()
       regs[CTRL] = bits({FD=0,SLU=6,RST=26,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0xffffffff                 -- Disable interrupts
+   end
+
+   function pcie_master_reset()
+      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
+      C.usleep(1000) -- wait 1ms
+      --print("DBG: reset: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
+      regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
    end
 
    function init_pci ()
@@ -453,10 +456,8 @@ function new (pciaddress)
       print ("DBG: regs[PBS]   = "..bit.tohex(regs[PBS]))
    end M.tx_diagnostics = tx_diagnostics
 
-   --assumes given mss = header + TCP/UDP payload size (so 1500 for tcp = 54 header + 1446 payload )
+   --note: mss = TCP/UDP payload size (excluding headers)
    local function add_txbuf_tso (address, size, mss, context)
-      --ui_tdt = ffi.cast("uint32_t", tdt)
-      --ctx = ffi.cast("struct tx_context_desc *", txdesc._ptr + ui_tdt)
       local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
@@ -464,15 +465,13 @@ function new (pciaddress)
       ctx.ipcse  = 0    --IP CheckSum End
       ctx.ipcso  = 0    --IP CheckSum Offset
       ctx.ipcss  = 0    --IP CheckSum Start
-      ctx.mss    = 0    --Maximum Segment Size (1440)
+      ctx.mss    = mss  --Maximum Segment Size (TCP/UDP payload size not including headers)
       ctx.hdrlen = 0    --Header Length
       ctx.sta    = 0    --Status  -- bits({rsv2=3, rsv1=2, rsv0=1, dd=0})
       ctx.tucmd  = bits({dext=5, tse=2}) --Command --dext: ctxt desc fmt ; tse: TCP Segmentation Enable
                 -- bits({ide=7, snap=6, dext=5, rsv=4, rs=3, tse=2, ip=1, tcp=0})
       ctx.dtype  = 0    --Descriptor Type --Must be 0x0000 for context desc fmt
       ctx.paylen = 0    --Payload Length
-
-      --context = buffers._ptr --test
 
       local frame_len = 14 -- Ethernet frame length
       local mem = protected("uint8_t", context, frame_len, 12) --for accessing IP header fields
@@ -528,7 +527,6 @@ function new (pciaddress)
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
 
-      ctx.mss = mss - ctx.hdrlen -- maximum tcp/udp payload segment size (not incl headers)
       pl[0], pl[1] = 0, 0 --reset IP packet length
 
       txdesc[tdt].ctx.tucse = ctx.tucse
@@ -790,7 +788,7 @@ function new (pciaddress)
       print "selftest: TCP Segmentation Offload (TSO)"
       options = options or {}
       local size = options.size or 4 --4096
-      local mss  = options.mss  or 1500
+      local mss  = options.mss  or 1442
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
@@ -803,11 +801,7 @@ function new (pciaddress)
       print "waiting for old traffic to die out ..."
       --C.usleep(100000) -- Wait for old traffic from previous tests to die out
 
-      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
-      --local deadline = C.get_time_ns() + 
-      C.usleep(10000) -- wait 10ms 
-      print("DBG: selftest_tso: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
-      regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
+      pcie_master_reset()
 
       test.waitfor("linkup", M.linkup, 20, 250000)
 
@@ -849,18 +843,13 @@ function new (pciaddress)
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
 
-      regs[CTRL] = bit.bor(regs[CTRL], bits({GMD=2})) -- Set GIO Master Disable
-      --local deadline = C.get_time_ns() + 
-      C.usleep(1000) -- wait 1ms 
-      print("DBG: selftest_tso: GIO Master Enable Status: "..tostring(bitset(regs[STATUS], 19)) ) --GIO Master Enable Status 
-      regs[CTRL] = bit.band(regs[CTRL], bit.bnot(bits({GMD=2})) ) -- Clear GIO Master Disable
-
+      pcie_master_reset()
       --M.tx_diagnostics()
       --M.init()
    end
 
    function M.add_tso_test_buffer (size, mss)
-      -- Construct a TCP packet of 'size' total bytes and transmit with TSO.
+      -- Construct a TCP packet of 'size' total bytes (includes CRC) and transmit with TSO (with TCP MSS = mss bytes)
     
     local packet = nil --packet headers only
     local hdr_len = 54 
