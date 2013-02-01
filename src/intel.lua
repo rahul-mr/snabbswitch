@@ -484,6 +484,7 @@ function new (pciaddress)
       local hdr_len  = -1 -- IP header length
       local plen_off = -1 -- IP payload length field offset
       local prot_off = -1 -- IP protocol field offset
+      local add_plen = -1 -- used for IPv6 packet length calculation
 
       if ver == 0x40 then --IPv4
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
@@ -494,16 +495,19 @@ function new (pciaddress)
         plen_off = 2
         prot_off = 9
         ctx.ipcse = frame_len + hdr_len
+        add_plen = 0
       else --ver == 0x60 --IPv6
+        print("DBG: he he ipv6 ;-)")
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
         hdr_len  = 40
         plen_off = 4
-        prot_off = 6 
+        prot_off = 6
+        add_plen = 40 
       end --ver
 
       local pl = protected("uint8_t", context, frame_len + plen_off, 2)
-      local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
-      --print("DBG: pkt_len = " .. bit.tohex(pkt_len))
+      local pkt_len = add_plen + bit.bor( bit.lshift(pl[0], 8), pl[1] )
+      print("DBG: pkt_len = " .. bit.tohex(pkt_len).." ("..tostring(pkt_len)..")")
 
       ctx.ipcss = frame_len     
       ctx.ipcso = frame_len + ipcs_off
@@ -516,7 +520,7 @@ function new (pciaddress)
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
         local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
-       --print("DBG: data_off = " .. bit.tohex(data_off))
+        print("DBG: data_off = " .. bit.tohex(data_off))
         ctx.hdrlen = frame_len + hdr_len + data_off * 4
         ctx.paylen = pkt_len - hdr_len - data_off * 4
 
@@ -546,23 +550,23 @@ function new (pciaddress)
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
 
---      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
---      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
---      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
---      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
---      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
---      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
---                                      
---      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
---      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
---      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
---                  
---      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
---      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
---      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
---
---      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
---      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
+      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
+      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
+      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
+      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
+      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
+      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
+                                      
+      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
+      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
+      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
+                  
+      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
+      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
+      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
+
+      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 
       tdt = (tdt + 1) % num_descriptors
       --M.add_txbuf(address, size) --write data descriptor (won't work)
@@ -570,8 +574,12 @@ function new (pciaddress)
       
       if ctx.paylen < mss then --why did you even call this function :-P
         txdesc[tdt].data.options = bit.bor(size, txdesc_flags)
-      else
+      elseif ver == 0x40 then --IPv4
         txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+      elseif ver == 0x60 then --IPv6
+        txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, txsm=41})) --ixsm ignored
+      else
+        assert(false, "something's wrong ;-)")
       end
 
       tdt = (tdt + 1) % num_descriptors
@@ -879,6 +887,21 @@ function new (pciaddress)
                  0x00, 0x01, 0x03, 0xE7, 0x03, 0xE7, 0x0F, 0xDE, 0x2A, 0xB2 }
       hdr_len = 42
 
+    elseif size == 4096 and ipv6 ~= nil and udp == nil then --TCP/IPv6 with size 4096
+      packet = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x86, 0xDD, 0x60, 0x00,  
+                 0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  
+                 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }
+      hdr_len = 74
+      print("DBG: yeah ipv6 ;-)")
+    elseif size == 4096 and ipv6 ~= nil and udp ~= nil then --UDP/IPv6 with size 4096
+      packet = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x86, 0xDD, 0x60, 0x00,
+                 0x00, 0x00, 0x0F, 0xCA, 0x11, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0xE7, 0x03, 0xE7, 0x0F, 0xCA, 0xB5, 0x67 }
+      hdr_len = 62
+      print("DBG: yeah ipv6 ;-)")
     else
       assert(false, "Not Implemented Yet ;-)")
     end
