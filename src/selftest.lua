@@ -18,25 +18,33 @@ for _,device in ipairs(pci.suitable_devices()) do
       error("Failed to prepare PCI device: " .. device.pciaddress)
    end
    local nic = intel.new(pciaddress)
-   print "NIC transmit test"
+   print "\nNIC transmit test"
    nic.init()
    nic.selftest({secs=1})
-   print "NIC transmit+receive loopback test"
+   print "\nNIC transmit+receive loopback test"
    nic.init()
    nic.reset_stats()
    nic.selftest({secs=1,loopback=true,receive=true})
-   print "NIC transmit tso test - defaults (size=4, mss=1442)" -- max frame size = 1500 (54 + 1442 + 4)
+   print "\nNIC tx tso test - defaults (TCP, IPv4, size=4, mss=1442)" -- max frame size = 1500 (54 + 1442 + 4)
    nic.init()
    nic.reset_stats()
    nic.selftest_tso()
-   print "NIC transmit tso test - size=4096, mss=1442" -- max frame size = 1500 (54 + 1442 + 4)
+   print "\nNIC tx tso test - TCP, IPv4, size=4096, mss=1442" -- max frame size = 1500 (54 + 1442 + 4)
    nic.init()
    nic.reset_stats()
    nic.selftest_tso({size=4096, mss=1442})
-   print "NIC transmit+receive loopback tso test - size=4096, mss=1442" -- max frame size = 1500 (54 + 1442 + 4)
+   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442" -- max frame size = 1500 (54 + 1442 + 4)
    nic.init()
    nic.reset_stats()
    nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true})
+   print "\nNIC tx tso test - UDP, IPv4, size=4096, mss=1454" -- max frame size = 1500 (42 + 1454 + 4)
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({udp=true, size=4096, mss=1454})
+   print "\nNIC tx+rx loopback tso test - UDP, IPv4, size=4096, mss=1454" -- max frame size = 1500 (42 + 1454 + 4)
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({udp=true, size=4096, mss=1454, loopback=true, receive=true})
 --   -- nic.selftest({packets=10000000})
 end
 
