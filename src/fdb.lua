@@ -5,10 +5,11 @@ local C = ffi.C
 
 function new()
    _pvt = { }
-   setmetatable(_pvt, { __mode = "kv" }) --weak keys and values
+   setmetatable(_pvt, { __mode = "v" }) --weak values
    
    F = { }
    setmetatable(F, { __index = function(t, key)
+                                 assert(type(key) == "string", "Key must be a string")
                                  local v = rawget(_pvt, key)
 
                                  if type(v) == "table" then
@@ -17,6 +18,7 @@ function new()
                                    if v.expiry <= C.get_time_ns() then --expired
                                       rawset(_pvt, key, nil)
                                       return nil
+
                                    else --not expired
                                       return v.port
                                    end
