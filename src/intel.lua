@@ -320,11 +320,11 @@ function new (pciaddress)
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
       regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
-      print("DBG: rxdesc_phy = "..tostring(rxdesc_phy))
+      --print("DBG: rxdesc_phy = "..tostring(rxdesc_phy))
       regs[RDBAL] = rxdesc_phy % (2^32)
-      print("DBG: regs[RDBAL] = "..tostring(regs[RDBAL]))
+      --print("DBG: regs[RDBAL] = "..tostring(regs[RDBAL]))
       regs[RDBAH] = rxdesc_phy / (2^32) 
-      print("DBG: regs[RDBAH] = "..tostring(regs[RDBAH]))
+      --print("DBG: regs[RDBAH] = "..tostring(regs[RDBAH]))
       regs[RDH] = 0
       regs[RDT] = 0
       rxnext = 0
@@ -351,6 +351,7 @@ function new (pciaddress)
       rdt = 0
       regs[RDT] = 0
       regs[RDH] = 0
+      C.usleep(1000) -- wait for 1 ms
    end M.clear_rx = clear_rx
 
    local function ring_pending(head, tail)
@@ -415,11 +416,11 @@ function new (pciaddress)
    end
 
    function init_transmit_ring ()
-      print("DBG: txdesc_phy = "..tostring(txdesc_phy))
+      --print("DBG: txdesc_phy = "..tostring(txdesc_phy))
       regs[TDBAL] = txdesc_phy % (2^32)
-      print("DBG: regs[TDBAL] = "..tostring(regs[TDBAL]))
+      --print("DBG: regs[TDBAL] = "..tostring(regs[TDBAL]))
       regs[TDBAH] = txdesc_phy / (2^32) 
-      print("DBG: regs[TDBAH] = "..tostring(regs[TDBAH]))
+      --print("DBG: regs[TDBAH] = "..tostring(regs[TDBAH]))
       -- Hardware requires the value to be 128-byte aligned
       assert( num_descriptors * ffi.sizeof("union tx") % 128 == 0 )
       regs[TDLEN] = num_descriptors * ffi.sizeof("union tx")
@@ -444,6 +445,7 @@ function new (pciaddress)
       tdt = 0
       regs[TDT] = 0
       regs[TDH] = 0
+      C.usleep(1000) -- wait for 1 ms
    end M.clear_tx = clear_tx
 
    local function tx_diagnostics()
@@ -501,7 +503,7 @@ function new (pciaddress)
 
       local pl = protected("uint8_t", context, frame_len + plen_off, 2)
       local pkt_len = bit.bor( bit.lshift(pl[0], 8), pl[1] )
-      print("DBG: pkt_len = " .. bit.tohex(pkt_len))
+      --print("DBG: pkt_len = " .. bit.tohex(pkt_len))
 
       ctx.ipcss = frame_len     
       ctx.ipcso = frame_len + ipcs_off
@@ -514,7 +516,7 @@ function new (pciaddress)
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
         local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
-        print("DBG: data_off = " .. bit.tohex(data_off))
+       --print("DBG: data_off = " .. bit.tohex(data_off))
         ctx.hdrlen = frame_len + hdr_len + data_off * 4
         ctx.paylen = pkt_len - hdr_len - data_off * 4
 
@@ -544,23 +546,23 @@ function new (pciaddress)
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
 
-      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
-      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
-      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
-      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
-      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
-      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
-                                      
-      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
-      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
-      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
-                  
-      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
-      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
-      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
-
-      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
-      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
+--      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
+--      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
+--      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
+--      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
+--      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
+--      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
+--                                      
+--      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
+--      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
+--      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
+--                  
+--      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
+--      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
+--      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
+--
+--      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+--      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 
       tdt = (tdt + 1) % num_descriptors
       --M.add_txbuf(address, size) --write data descriptor (won't work)
@@ -789,6 +791,8 @@ function new (pciaddress)
       options = options or {}
       local size = options.size or 4 --4096
       local mss  = options.mss  or 1442
+      local ipv6 = options.ipv6
+      local udp  = options.udp
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
@@ -798,7 +802,7 @@ function new (pciaddress)
 
       local receive = options.receive or false
 
-      print "waiting for old traffic to die out ..."
+      --print "waiting for old traffic to die out ..."
       --C.usleep(100000) -- Wait for old traffic from previous tests to die out
 
       pcie_master_reset() -- will force clearing of pending descriptors
@@ -807,32 +811,32 @@ function new (pciaddress)
 
       M.update_stats()
       local txhardware_start = M.stats.GPTC
+      print("[Before]")
       M.print_stats()
       --M.print_status()
       --M.tx_diagnostics()
      
       if receive then
-         print "adding receive buffers..."
+         --print "adding receive buffers..."
          for i = 1, rx_available() do
             add_rxbuf(buffers_phy + 8192) --shouldn't overlap with tx's buffer ;-)
          end
          flush_rx()
       end
 
-      print "adding tso test buffer..."
+      --print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
-      M.add_tso_test_buffer(size, mss)
+      M.add_tso_test_buffer(size, mss, ipv6, udp)
       txeth = txeth + math.ceil(size / mss)
       
-      print "waiting for packet transmission..."
+      --print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
-      C.usleep(1000000) -- wait for 1s transmit
+      C.usleep(100000) -- wait for 100ms transmit
       M.clear_tx()
-      C.usleep(1000) -- wait for 1 ms
       M.clear_rx()
-      C.usleep(1000) -- wait for 1 ms
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
+      print("[After]")
       M.print_stats()
       --M.print_status()
 
@@ -848,26 +852,35 @@ function new (pciaddress)
       --M.init()
    end
 
-   function M.add_tso_test_buffer (size, mss)
+   function M.add_tso_test_buffer (size, mss, ipv6, udp)
       -- Construct a TCP packet of 'size' total bytes (excluding CRC) and transmit with TSO (with TCP MSS = mss bytes)
     
     local packet = nil --packet headers only
-    local hdr_len = 54 
+    local hdr_len = nil -- IP + TCP/UDP header length
 
-    if size == 4 then
+    if size == 4 and ipv6 == nil and udp == nil then --TCP/IPv4 with size 4
       --simple tcp/ip packet header with payload data = "AAAA" (size=4)
       packet = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
                 0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                 0x20, 0x00, 0x0E, 0xF6, 0x00, 0x00}
-      
-    elseif size == 4096 then
+      hdr_len = 54
+
+    elseif size == 4096 and ipv6 == nil and udp == nil then --TCP/IPv4 with size 4096
       packet = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
                  0x0F, 0xF2, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x6D, 0x03, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                  0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
                  0x20, 0x00, 0x59, 0x8A, 0x00, 0x00 }
+      hdr_len = 54
+
+    elseif size == 4096 and ipv6 == nil and udp ~= nil then --UDP/IPv4 with size 4096
+      packet = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00,
+                 0x0F, 0xF2, 0x00, 0x01, 0x00, 0x00, 0x40, 0x11, 0x6C, 0xF8, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
+                 0x00, 0x01, 0x03, 0xE7, 0x03, 0xE7, 0x0F, 0xDE, 0x2A, 0xB2 }
+      hdr_len = 42
+
     else
-      assert(false, "Not Implemented for given size ;-)")
+      assert(false, "Not Implemented Yet ;-)")
     end
 
     --all headers
@@ -884,7 +897,7 @@ function new (pciaddress)
     --M.add_txbuf(buffers_phy, 58)
     M.add_txbuf_tso(buffers_phy, size, mss, buffers._ptr)
     M.flush_tx()
-    M.tx_diagnostics()
+    --M.tx_diagnostics()
    end
 
    return M
