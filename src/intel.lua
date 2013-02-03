@@ -476,40 +476,39 @@ function new (pciaddress)
       ctx.paylen = 0    --Payload Length
 
       local frame_len = 14 -- Ethernet frame length
-      local mem = protected("uint8_t", context, frame_len, 12) --for accessing IP header fields
+      local mem = protected("uint8_t", context, frame_len, (size - frame_len)) --for accessing IP/TCP header fields
       local ver = bit.band(mem[0], 0x60)
       local ipcs_off = nil -- IP checksum field offset
       local hdr_len  = nil -- IP header length
       local plen_off = nil -- IP payload length field offset
       local prot_off = nil -- IP protocol field offset
-      local add_plen = nil -- used for IPv6 packet length calculation
+      local pkt_len  = nil -- IP packet length 
 
       if ver == 0x40 then --IPv4
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
         ipcs_off = 10
         mem[ipcs_off]     = 0   --clear IP header checksum field H
         mem[ipcs_off + 1] = 0   --clear IP header checksum field L
-        hdr_len = 4 * bit.band(mem[0], 0x0f) --IHL field
+        hdr_len = 4 * bit.band(mem[0], 0x0f) --read IHL field
         assert(hdr_len >= 20, "Invalid value for IPv4 IHL field")
+        ctx.ipcse = frame_len + hdr_len
         plen_off = 2
         prot_off = 9
-        ctx.ipcse = frame_len + hdr_len
-        add_plen = 0
+        pkt_len  = bit.bor( bit.lshift(mem[plen_off], 8), mem[plen_off+1] )
 
       elseif ver == 0x60 then--IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
         hdr_len  = 40
         plen_off = 4
         prot_off = 6
-        add_plen = 40 
+        pkt_len  = 40 + bit.bor( bit.lshift(mem[plen_off], 8), mem[plen_off+1] )
 
       else
         assert(false, "Invalid IP version/Unknown format")
       end --ver
 
-      local pl = protected("uint8_t", context, frame_len + plen_off, 2)
-      local pkt_len = add_plen + bit.bor( bit.lshift(pl[0], 8), pl[1] )
       --print("DBG: pkt_len = " .. bit.tohex(pkt_len).." ("..tostring(pkt_len)..")")
+      mem[plen_off], mem[plen_off+1] = 0, 0 --reset IP packet length
 
       ctx.ipcss = frame_len     
       ctx.ipcso = frame_len + ipcs_off
@@ -521,22 +520,20 @@ function new (pciaddress)
         ctx.tucso = frame_len + hdr_len + 16 --TCP checksum offset
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
-        local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
-        --print("DBG: data_off = " .. bit.tohex(data_off))
-        assert(data_off >=5 , "Invalid value for TCP data offset field")
-        ctx.hdrlen = frame_len + hdr_len + data_off * 4
-        ctx.paylen = pkt_len - hdr_len - data_off * 4
+        local tcp_len = 4 * bit.rshift( bit.band( mem[hdr_len+12], 0xF0 ), 4 ) --read Data Offset field 
+        --print("DBG: tcp_len = " .. bit.tohex(tcp_len)) --TCP header length
+        assert(tcp_len >= 20 , "Invalid value for TCP data offset field")
+        ctx.hdrlen = frame_len + hdr_len + tcp_len
+        ctx.paylen = pkt_len - hdr_len - tcp_len
 
       elseif mem[prot_off] == 0x11 then --UDP specific
-        ctx.tucso = frame_len + hdr_len + 6 --UDP checksum offset
-        ctx.hdrlen = frame_len + hdr_len + 6 + 2
-        ctx.paylen = pkt_len - hdr_len - ( 6 + 2 )
+        ctx.tucso  = frame_len + hdr_len + 6 --UDP checksum offset
+        ctx.hdrlen = frame_len + hdr_len + 8
+        ctx.paylen = pkt_len - hdr_len - 8
 
       else
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
-
-      pl[0], pl[1] = 0, 0 --reset IP packet length
 
       txdesc[tdt].ctx.tucse = ctx.tucse
       txdesc[tdt].ctx.tucso = ctx.tucso
@@ -572,7 +569,6 @@ function new (pciaddress)
 --      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 --
       tdt = (tdt + 1) % num_descriptors
-      --M.add_txbuf(address, size) --write data descriptor (won't work)
       txdesc[tdt].data.address = address
       
       if ctx.paylen < mss then --why did you even call this function :-P
