@@ -219,9 +219,9 @@ function new (pciaddress)
    function init_dma_memory ()
       --local descriptor_bytes = 1024 * 1024
       --local buffers_bytes = 2 * 1024 * 1024
-      rxdesc, rxdesc_phy = memory.dma_alloc2(num_descriptors * ffi.sizeof("union rx"))
-      txdesc, txdesc_phy = memory.dma_alloc2(num_descriptors * ffi.sizeof("union tx"))
-      buffers, buffers_phy = memory.dma_alloc2(buffer_count * ffi.sizeof("uint8_t"))
+      rxdesc, rxdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union rx"))
+      txdesc, txdesc_phy = memory.dma_alloc(num_descriptors * ffi.sizeof("union tx"))
+      buffers, buffers_phy = memory.dma_alloc(buffer_count * ffi.sizeof("uint8_t"))
       -- Add bounds checking
       rxdesc  = protected("union rx", rxdesc, 0, num_descriptors)
       txdesc  = protected("union tx", txdesc, 0, num_descriptors)
