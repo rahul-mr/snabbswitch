@@ -478,13 +478,11 @@ function new (pciaddress)
       local frame_len = 14 -- Ethernet frame length
       local mem = protected("uint8_t", context, frame_len, 12) --for accessing IP header fields
       local ver = bit.band(mem[0], 0x60)
-      assert(ver ~= 0, "Invalid IP version/Unknown format");
-
-      local ipcs_off = -1 -- IP checksum field offset
-      local hdr_len  = -1 -- IP header length
-      local plen_off = -1 -- IP payload length field offset
-      local prot_off = -1 -- IP protocol field offset
-      local add_plen = -1 -- used for IPv6 packet length calculation
+      local ipcs_off = nil -- IP checksum field offset
+      local hdr_len  = nil -- IP header length
+      local plen_off = nil -- IP payload length field offset
+      local prot_off = nil -- IP protocol field offset
+      local add_plen = nil -- used for IPv6 packet length calculation
 
       if ver == 0x40 then --IPv4
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
@@ -492,17 +490,21 @@ function new (pciaddress)
         mem[ipcs_off]     = 0   --clear IP header checksum field H
         mem[ipcs_off + 1] = 0   --clear IP header checksum field L
         hdr_len = 4 * bit.band(mem[0], 0x0f) --IHL field
+        assert(hdr_len >= 20, "Invalid value for IPv4 IHL field")
         plen_off = 2
         prot_off = 9
         ctx.ipcse = frame_len + hdr_len
         add_plen = 0
-      else --ver == 0x60 --IPv6
-        --print("DBG: he he ipv6 ;-)")
+
+      elseif ver == 0x60 then--IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
         hdr_len  = 40
         plen_off = 4
         prot_off = 6
         add_plen = 40 
+
+      else
+        assert(false, "Invalid IP version/Unknown format")
       end --ver
 
       local pl = protected("uint8_t", context, frame_len + plen_off, 2)
@@ -521,6 +523,7 @@ function new (pciaddress)
 
         local data_off = bit.rshift( bit.band( (protected("uint8_t", context, frame_len + hdr_len + 12, 1))[0], 0xF0 ), 4) 
         --print("DBG: data_off = " .. bit.tohex(data_off))
+        assert(data_off >=5 , "Invalid value for TCP data offset field")
         ctx.hdrlen = frame_len + hdr_len + data_off * 4
         ctx.paylen = pkt_len - hdr_len - data_off * 4
 
