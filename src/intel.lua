@@ -461,6 +461,7 @@ function new (pciaddress)
 
    --Note: size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
    --      descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
+   --Note: when using multiple descriptors, try to have all headers (Ethernet + IP + TCP) in first descriptor (pg 177 of DS)
    local function add_txbuf_tso (descriptors, size, mss, context)
       assert(descriptors and mss and context, "All arguments must be non-nil")
       local ctx = { }
@@ -572,23 +573,34 @@ function new (pciaddress)
 --      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 --
 
+      assert(#descriptors > 0, "need atleast 1 descriptor")
+
       for i = 1, #descriptors do
         tdt = (tdt + 1) % num_descriptors
 
-        txdesc[tdt].data.address = descriptors[i].address
+        txdesc[tdt].data.address = descriptors[i].address or assert(false, "descriptor address not given")
         
+        local dsize = descriptors[i].size or assert(false, "descriptor size not given")
+        local doptions = nil
+	
+        if i == #descriptors then
+          doptions = bits({eop=24})
+        else
+          doptions = 0
+        end
+
         if ctx.paylen < mss then --why did you even call this function :-P
-          txdesc[tdt].data.options = bit.bor(descriptors[i].size, txdesc_flags)
+          doptions = bit.bor(dsize, txdesc_flags, doptions)
         elseif ver == 0x40 then --IPv4
-          txdesc[tdt].data.options = bit.bor(descriptors[i].size, 
-                                             bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}), doptions)
         elseif ver == 0x60 then --IPv6
-          txdesc[tdt].data.options = bit.bor(descriptors[i].size, 
-                                             bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, txsm=41})) --ixsm ignored
+          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29, txsm=41}), doptions) --ixsm ignored 
         else
           assert(false, "something's wrong ;-)")
         end
-  
+
+        txdesc[tdt].data.options = doptions 
+        
         tdt = (tdt + 1) % num_descriptors
       end
 
@@ -925,6 +937,7 @@ function new (pciaddress)
     for i = 0, (size - hdr_len -1), 1 do
         buffers[hdr_len + i] = 41 --char 'A'
     end
+
 
     --M.add_txbuf(buffers_phy, 58)
     local descriptors = { {address = buffers_phy, size = size} }
