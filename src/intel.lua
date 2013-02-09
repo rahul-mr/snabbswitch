@@ -316,9 +316,10 @@ function new (pciaddress)
             BAM=15         -- Broadcast Accept Mode
          })
       regs[RFCTL] = bits({EXSTEN=15})  -- Extended RX writeback descriptor format
-      regs[RXDCTL] = bits({GRAN=24, WTHRESH0=16})
+      regs[RXDCTL] = bits({ GRAN=24, PTHRESH1=1, HTHRESH1=9, WTHRESH1=17 })
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
-      regs[RADV] = math.log(1024,2)    -- 1us max writeback delay
+      regs[RADV] = 1     --  1 * 1us rx intrrupt absolute delay
+      regs[RDTR] = 10    -- 10 * 1us rx interrupt delay timer
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
       --print("DBG: rxdesc_phy = "..tostring(rxdesc_phy))
       regs[RDBAL] = rxdesc_phy % (2^32)
@@ -786,6 +787,7 @@ function new (pciaddress)
                end
             end
             flush_tx()
+            --C.usleep(10000) --10ms ought to be enough for every NIC :-P
          until done()
          M.update_stats()
          M.print_stats()
