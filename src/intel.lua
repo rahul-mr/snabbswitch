@@ -460,7 +460,9 @@ function new (pciaddress)
    end M.tx_diagnostics = tx_diagnostics
 
    --Note: size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
-   local function add_txbuf_tso (address, size, mss, context)
+   --      descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
+   local function add_txbuf_tso (descriptors, size, mss, context)
+      assert(descriptors and mss and context, "All arguments must be non-nil")
       local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
@@ -569,20 +571,26 @@ function new (pciaddress)
 --      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
 --      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
 --
-      tdt = (tdt + 1) % num_descriptors
-      txdesc[tdt].data.address = address
-      
-      if ctx.paylen < mss then --why did you even call this function :-P
-        txdesc[tdt].data.options = bit.bor(size, txdesc_flags)
-      elseif ver == 0x40 then --IPv4
-        txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
-      elseif ver == 0x60 then --IPv6
-        txdesc[tdt].data.options = bit.bor(size, bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, txsm=41})) --ixsm ignored
-      else
-        assert(false, "something's wrong ;-)")
-      end
 
-      tdt = (tdt + 1) % num_descriptors
+      for i = 1, #descriptors do
+        tdt = (tdt + 1) % num_descriptors
+
+        txdesc[tdt].data.address = descriptors[i].address
+        
+        if ctx.paylen < mss then --why did you even call this function :-P
+          txdesc[tdt].data.options = bit.bor(descriptors[i].size, txdesc_flags)
+        elseif ver == 0x40 then --IPv4
+          txdesc[tdt].data.options = bit.bor(descriptors[i].size, 
+                                             bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}))
+        elseif ver == 0x60 then --IPv6
+          txdesc[tdt].data.options = bit.bor(descriptors[i].size, 
+                                             bits({dtype=20, eop=24, ifcs=25, tse=26, dext=29, txsm=41})) --ixsm ignored
+        else
+          assert(false, "something's wrong ;-)")
+        end
+  
+        tdt = (tdt + 1) % num_descriptors
+      end
 
    end M.add_txbuf_tso = add_txbuf_tso
  
@@ -919,7 +927,8 @@ function new (pciaddress)
     end
 
     --M.add_txbuf(buffers_phy, 58)
-    M.add_txbuf_tso(buffers_phy, size, mss, buffers._ptr)
+    local descriptors = { {address = buffers_phy, size = size} }
+    M.add_txbuf_tso( descriptors, size, mss, buffers._ptr)
     M.flush_tx()
     --M.tx_diagnostics()
    end
