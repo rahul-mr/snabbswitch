@@ -554,6 +554,8 @@ function new (pciaddress)
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
 
+      tdt = (tdt + 1) % num_descriptors --next for data descriptors
+
 --      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
 --      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
 --      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
@@ -576,7 +578,6 @@ function new (pciaddress)
       assert(#descriptors > 0, "need atleast 1 descriptor")
 
       for i = 1, #descriptors do
-        tdt = (tdt + 1) % num_descriptors
 
         txdesc[tdt].data.address = descriptors[i].address or assert(false, "descriptor address not given")
         
@@ -600,7 +601,7 @@ function new (pciaddress)
         end
 
         txdesc[tdt].data.options = doptions 
-        
+      
         tdt = (tdt + 1) % num_descriptors
       end
 
@@ -818,10 +819,13 @@ function new (pciaddress)
    function M.selftest_tso (options)
       print "selftest: TCP Segmentation Offload (TSO)"
       options = options or {}
-      local size = options.size or 4 --4096
-      local mss  = options.mss  or 1442
-      local ipv6 = options.ipv6
-      local udp  = options.udp
+      local size    = options.size or 4 --4096
+      local mss     = options.mss  or 1442
+      local ipv6    = options.ipv6
+      local udp     = options.udp
+      local receive = options.receive or false
+      local multi   = options.multi or 1
+
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
 
@@ -829,7 +833,6 @@ function new (pciaddress)
          M.enable_mac_loopback()
       end
 
-      local receive = options.receive or false
 
       --print "waiting for old traffic to die out ..."
       --C.usleep(100000) -- Wait for old traffic from previous tests to die out
@@ -855,7 +858,7 @@ function new (pciaddress)
 
       --print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
-      M.add_tso_test_buffer(size, mss, ipv6, udp)
+      M.add_tso_test_buffer(size, mss, ipv6, udp, multi)
       txeth = txeth + math.ceil(size / mss)
       
       --print "waiting for packet transmission..."
@@ -881,7 +884,7 @@ function new (pciaddress)
       --M.init()
    end
 
-   function M.add_tso_test_buffer (size, mss, ipv6, udp)
+   function M.add_tso_test_buffer (size, mss, ipv6, udp, multi)
       -- Construct a TCP packet of 'size' total bytes (excluding CRC) and transmit with TSO (with TCP MSS = mss bytes)
     
     local packet = nil --packet headers only
@@ -940,7 +943,21 @@ function new (pciaddress)
 
 
     --M.add_txbuf(buffers_phy, 58)
-    local descriptors = { {address = buffers_phy, size = size} }
+    local descriptors = nil
+
+    if multi == 1 then
+      descriptors = { {address = buffers_phy, size = size} }
+    elseif multi == 2 then
+      descriptors = { {address = buffers_phy, size = hdr_len}, 
+                      {address = buffers_phy + hdr_len, size = size - hdr_len} }
+    elseif multi == 3 and size == 4096 then
+      descriptors = { {address = buffers_phy, size = hdr_len}, 
+                      {address = buffers_phy + hdr_len, size = 1024},
+                      {address = buffers_phy + hdr_len + 1024, size = size - hdr_len - 1024} }
+    else
+      assert(false, "Not Implemented yet!! ;-)")
+    end
+
     M.add_txbuf_tso( descriptors, size, mss, buffers._ptr)
     M.flush_tx()
     --M.tx_diagnostics()
