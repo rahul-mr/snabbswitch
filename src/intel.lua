@@ -318,7 +318,7 @@ function new (pciaddress)
       regs[RFCTL] = bits({EXSTEN=15})  -- Extended RX writeback descriptor format
       regs[RXDCTL] = bits({ GRAN=24, PTHRESH1=1, HTHRESH1=9, WTHRESH1=17 })
       regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
-      regs[RADV] = 1     --  1 * 1us rx intrrupt absolute delay
+      regs[RADV] = 1     --  1 * 1us rx interrupt absolute delay
       regs[RDTR] = 10    -- 10 * 1us rx interrupt delay timer
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
       --print("DBG: rxdesc_phy = "..tostring(rxdesc_phy))
