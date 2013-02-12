@@ -198,7 +198,7 @@ function new (pciaddress)
    function reset ()
       regs[IMC] = 0xffffffff                 -- Disable interrupts
       pcie_master_reset()
-      regs[CTRL] = bits({FD=0,SLU=6,RST=26,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
+      regs[CTRL] = bits({FD=0,SLU=6,RST=26,VME=30,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0xffffffff                 -- Disable interrupts
    end
@@ -461,9 +461,10 @@ function new (pciaddress)
 
    --Note: size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
    --      descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
+   --      vlan = Dictionary: { pcp, cfi, vid }
    --Note: when using multiple descriptors, try to have all headers (Ethernet + IP + TCP) in first descriptor (pg 177 of DS)
-   local function add_txbuf_tso (descriptors, size, mss, context)
-      assert(descriptors and mss and context, "All arguments must be non-nil")
+   local function add_txbuf_tso (descriptors, size, mss, context, vlan)
+      assert(descriptors and mss and context, "All arguments (except vlan) must be non-nil")
       local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
@@ -554,26 +555,26 @@ function new (pciaddress)
                                                     bit.lshift(ctx.dtype,  20),
                                                                ctx.paylen      )
 
-      tdt = (tdt + 1) % num_descriptors --next for data descriptors
+      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
+      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
+      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
+      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
+      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
+      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
+                                      
+      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
+      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
+      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
+                  
+      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
+      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
+      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
 
---      print("ctx.tucse = " ..  bit.tohex(tonumber(ctx.tucse)) .." | ".. tonumber(ctx.tucse))
---      print("ctx.tucso = " ..  bit.tohex(tonumber(ctx.tucso)) .." | ".. tonumber(ctx.tucso))
---      print("ctx.tucss = " ..  bit.tohex(tonumber(ctx.tucss)) .." | ".. tonumber(ctx.tucss))
---      print("ctx.ipcse = " ..  bit.tohex(tonumber(ctx.ipcse)) .." | ".. tonumber(ctx.ipcse))
---      print("ctx.ipcso = " ..  bit.tohex(tonumber(ctx.ipcso)) .." | ".. tonumber(ctx.ipcso))
---      print("ctx.ipcss = " ..  bit.tohex(tonumber(ctx.ipcss)) .." | ".. tonumber(ctx.ipcss))
---                                      
---      print("ctx.mss   = " ..  bit.tohex(tonumber(ctx.mss)) .." | ".. tonumber(ctx.mss))
---      print("ctx.hdrlen= " ..  bit.tohex(tonumber(ctx.hdrlen)) .." | ".. tonumber(ctx.hdrlen))
---      print("ctx.sta   = " ..  bit.tohex(tonumber(ctx.sta)) .." | ".. tonumber(ctx.sta))
---                  
---      print("ctx.tucmd = " ..  bit.tohex(tonumber(ctx.tucmd)) .." | ".. tonumber(ctx.tucmd))
---      print("ctx.dtype = " ..  bit.tohex(tonumber(ctx.dtype)) .." | ".. tonumber(ctx.dtype))
---      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
---
---      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
---      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
---
+      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
+
+
+      tdt = (tdt + 1) % num_descriptors --next for data descriptors
 
       assert(#descriptors > 0, "need atleast 1 descriptor")
 
@@ -593,15 +594,30 @@ function new (pciaddress)
         if ctx.paylen < mss then --why did you even call this function :-P
           doptions = bit.bor(dsize, txdesc_flags, doptions)
         elseif ver == 0x40 then --IPv4
-          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29, ixsm=40, txsm=41}), doptions)
+          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
+           --, ixsm=40, txsm=41 (damn, bit lib doesn't support >32 bits)
+          doptions = doptions + bits({ ixsm = 40-32, txsm = 41-32 }) * (2^32)
         elseif ver == 0x60 then --IPv6
-          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29, txsm=41}), doptions) --ixsm ignored 
+          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
+           --, txsm=41 (damn, bit lib doesn't support >32 bits)
+          doptions = doptions + bits({ txsm = 41-32 }) * (2^32)
+           
         else
           assert(false, "something's wrong ;-)")
         end
 
+        if i==1 and vlan ~= nil then --set vlan field, vle bit for 1st data descriptor
+          print "DBG: i==1 and vlan ~= nil called"
+          assert(vlan.pcp and vlan.cfi and vlan.vid, "vlan - pcp, cfi, vid keys must be set")
+          doptions =  doptions  + bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ) * (2^48)  + 
+                      bits({vle=30})
+--      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(doptions / (2^32))).." "..bit.tohex(tonumber(doptions % (2^32))) )
+        end
+
         txdesc[tdt].data.options = doptions 
       
+      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
         tdt = (tdt + 1) % num_descriptors
       end
 
@@ -825,6 +841,7 @@ function new (pciaddress)
       local udp     = options.udp
       local receive = options.receive or false
       local multi   = options.multi or 1
+      local vlan    = options.vlan
 
       local txtcp = 1 -- Total number of TCP segments allocated
       local txeth = 0 -- Expected number of ethernet packets sent
@@ -858,7 +875,7 @@ function new (pciaddress)
 
       --print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
-      M.add_tso_test_buffer(size, mss, ipv6, udp, multi)
+      M.add_tso_test_buffer(size, mss, ipv6, udp, multi, vlan)
       txeth = txeth + math.ceil(size / mss)
       
       --print "waiting for packet transmission..."
@@ -884,7 +901,7 @@ function new (pciaddress)
       --M.init()
    end
 
-   function M.add_tso_test_buffer (size, mss, ipv6, udp, multi)
+   function M.add_tso_test_buffer (size, mss, ipv6, udp, multi, vlan)
       -- Construct a TCP packet of 'size' total bytes (excluding CRC) and transmit with TSO (with TCP MSS = mss bytes)
     
     local packet = nil --packet headers only
@@ -958,7 +975,7 @@ function new (pciaddress)
       assert(false, "Not Implemented yet!! ;-)")
     end
 
-    M.add_txbuf_tso( descriptors, size, mss, buffers._ptr)
+    M.add_txbuf_tso( descriptors, size, mss, buffers._ptr, vlan )
     M.flush_tx()
     --M.tx_diagnostics()
    end
