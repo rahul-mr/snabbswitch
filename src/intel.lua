@@ -198,9 +198,10 @@ function new (pciaddress)
    function reset ()
       regs[IMC] = 0xffffffff                 -- Disable interrupts
       pcie_master_reset()
-      regs[CTRL] = bits({FD=0,SLU=6,RST=26,VME=30,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
+      regs[CTRL] = bits({FD=0,SLU=6,RST=26,PHY_RST=31}) -- Global reset [ will (hopefully!) clear GIO Master Disable ]
       C.usleep(10); assert( not bitset(regs[CTRL],26) )
       regs[IMC] = 0xffffffff                 -- Disable interrupts
+      regs[CTRL] = bits({VME=30}) -- Enable vlan tagging
    end
 
    function pcie_master_reset()
@@ -585,7 +586,7 @@ function new (pciaddress)
         local dsize = descriptors[i].size or assert(false, "descriptor size not given")
         local doptions = nil
 	
-        if i == #descriptors then
+        if i == #descriptors then --set EOP for last descriptor
           doptions = bits({eop=24})
         else
           doptions = 0
@@ -606,12 +607,13 @@ function new (pciaddress)
           assert(false, "something's wrong ;-)")
         end
 
+        print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
+
         if i==1 and vlan ~= nil then --set vlan field, vle bit for 1st data descriptor
           print "DBG: i==1 and vlan ~= nil called"
           assert(vlan.pcp and vlan.cfi and vlan.vid, "vlan - pcp, cfi, vid keys must be set")
           doptions =  doptions  + bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ) * (2^48)  + 
                       bits({vle=30})
---      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(doptions / (2^32))).." "..bit.tohex(tonumber(doptions % (2^32))) )
         end
 
         txdesc[tdt].data.options = doptions 
@@ -942,6 +944,13 @@ function new (pciaddress)
                  0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                  0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0xE7, 0x03, 0xE7, 0x0F, 0xCA, 0xB5, 0x67 }
       hdr_len = 62
+
+    elseif size == 2922 and ipv6 ~= nil and udp ~= nil then --UDP/IPv6 with size 2922 
+     packet = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x86, 0xDD, 0x60, 0x00,
+                0x00, 0x00, 0x0B, 0x34, 0x11, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0xE7, 0x03, 0xE7, 0x0B, 0x34, 0x5F, 0x34 } 
+     hdr_len = 62
 
     else
       assert(false, "Not Implemented Yet ;-)")
