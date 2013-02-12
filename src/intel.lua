@@ -609,7 +609,7 @@ function new (pciaddress)
 
         print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
 
-        if i==1 and vlan ~= nil then --set vlan field, vle bit for 1st data descriptor
+        if vlan ~= nil then --set vlan field, vle bit for 1st data descriptor
           print "DBG: i==1 and vlan ~= nil called"
           assert(vlan.pcp and vlan.cfi and vlan.vid, "vlan - pcp, cfi, vid keys must be set")
           doptions =  doptions  + bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ) * (2^48)  + 
