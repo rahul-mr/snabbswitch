@@ -25,7 +25,7 @@ for _,device in ipairs(pci.suitable_devices()) do
    nic.init()
    nic.reset_stats()
    nic.selftest({secs=1,loopback=true,receive=true})
-   print "\nNIC tx tso test - defaults (TCP, IPv4, size=4, mss=1442)" -- max frame size = 1500 (54 + 1442 + 4)
+   print "\nNIC tx tso test - defaults (TCP, IPv4, size=58, mss=1442)" 
    nic.init()
    nic.reset_stats()
    nic.selftest_tso()

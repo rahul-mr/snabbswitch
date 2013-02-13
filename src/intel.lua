@@ -460,9 +460,9 @@ function new (pciaddress)
       print ("DBG: regs[PBS]   = "..bit.tohex(regs[PBS]))
    end M.tx_diagnostics = tx_diagnostics
 
-   --Note: size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
-   --      descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
-   --      vlan = Dictionary: { pcp, cfi, vid }
+   --Note: descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
+   --      size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
+   --      context = start address of ethernet frame ; vlan = Dictionary: { pcp, cfi, vid }
    --Note: when using multiple descriptors, try to have all headers (Ethernet + IP + TCP) in first descriptor (pg 177 of DS)
    local function add_txbuf_tso (descriptors, size, mss, context, vlan)
       assert(descriptors and mss and context, "All arguments (except vlan) must be non-nil")
@@ -540,6 +540,8 @@ function new (pciaddress)
       else
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
+
+      --XXX the partial pseudo-header's TCP/UDP checksum may have to be re-calculated (BTW use NIC's rx checksum offload)
 
       txdesc[tdt].ctx.tucse = ctx.tucse
       txdesc[tdt].ctx.tucso = ctx.tucso
@@ -843,7 +845,7 @@ function new (pciaddress)
    function M.selftest_tso (options)
       print "selftest: TCP Segmentation Offload (TSO)"
       options = options or {}
-      local size    = options.size or 4 --4096
+      local size    = options.size or 58 --4096
       local mss     = options.mss  or 1442
       local ipv6    = options.ipv6
       local udp     = options.udp
@@ -904,6 +906,17 @@ function new (pciaddress)
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
 
+--      if size==4096 then
+--        print "DBG: verifying received packet data for size==4096 :"
+--        local mem = protected("uint8_t", buffers._ptr, 8192, size) --for accessing rx buf
+--        local r = M.receive()
+--        print(r)
+--        for i=0, size-1 do
+--          io.write("buffers["..tostring(i).."] = "..bit.tohex(tonumber(buffers[i])).." | ")
+--          io.write("mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i])).."\n")
+--        end
+--      end
+
       pcie_master_reset() --force clearing of pending descriptors
       --M.tx_diagnostics()
       --M.init()
@@ -915,7 +928,7 @@ function new (pciaddress)
     local packet = nil --packet headers only
     local hdr_len = nil -- IP + TCP/UDP header length
 
-    if size == 4 and ipv6 == nil and udp == nil then --TCP/IPv4 with size 4
+    if size == 58 and ipv6 == nil and udp == nil then --TCP/IPv4 with size 4
       --simple tcp/ip packet header with payload data = "AAAA" (size=4)
       packet = {0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x08, 0x00, 0x45, 0x00,
                 0x00, 0x2C, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x7C, 0xC9, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
