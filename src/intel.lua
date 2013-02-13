@@ -609,8 +609,8 @@ function new (pciaddress)
 
         print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
 
-        if vlan ~= nil then --set vlan field, vle bit for 1st data descriptor
-          print "DBG: i==1 and vlan ~= nil called"
+        if vlan ~= nil then --set vlan field, vle bit for all data descriptors (DS says these fields valid only for 1st desc)
+                            --But testing shows 3000 TOTC instead of correct TOTC if fields not set for descs > 1
           assert(vlan.pcp and vlan.cfi and vlan.vid, "vlan - pcp, cfi, vid keys must be set")
           doptions =  doptions  + bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ) * (2^48)  + 
                       bits({vle=30})
