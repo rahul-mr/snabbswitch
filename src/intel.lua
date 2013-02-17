@@ -341,7 +341,7 @@ function new (pciaddress)
       rxdesc[rdt].data.address = address
       rxdesc[rdt].data.dd = 0
       rdt = (rdt + 1) % num_descriptors
---      rxbuffers[rdt] = address
+      rxbuffers[rdt] = address
       return true
    end M.add_rxbuf = add_rxbuf
 
@@ -462,10 +462,10 @@ function new (pciaddress)
 
    --Note: descriptors = Array of { address, size } elements. Each element must be a data descriptor forming part of packet
    --      size = ethernet frame size (excluding CRC) ; mss = TCP/UDP payload size (excluding headers)
-   --      context = start address of ethernet frame ; vlan = Dictionary: { pcp, cfi, vid }
-   --Note: when using multiple descriptors, try to have all headers (Ethernet + IP + TCP) in first descriptor (pg 177 of DS)
+   --      context = uint8_t* ptr (ffi.cast) to context descriptor ; vlan (optional) = Dictionary: { pcp, cfi, vid }
+   --Note: when using multiple data descriptors, try to have all headers (Ethernet+IP+TCP) in 1st descriptor (pg 177 of DS)
    local function add_txbuf_tso (descriptors, size, mss, context, vlan)
-      assert(descriptors and mss and context, "All arguments (except vlan) must be non-nil")
+      assert(descriptors and size and mss and context, "All arguments (except vlan) must be non-nil")
       local ctx = { }
       ctx.tucse  = 0    --TCP/UDP CheckSum End
       ctx.tucso  = 0    --TCP/UDP CheckSum Offset
@@ -482,7 +482,7 @@ function new (pciaddress)
       ctx.paylen = 0    --Payload Length
 
       local frame_len = 14 -- Ethernet frame length
-      local mem = protected("uint8_t", context, frame_len, (size - frame_len)) --for accessing IP/TCP header fields
+      local mem = protected("uint8_t", context, frame_len, 60 + 60) --for accessing IP/TCP header fields
       local ver = bit.band(mem[0], 0x60)
       local ipcs_off = nil -- IP checksum field offset
       local hdr_len  = nil -- IP header length
@@ -596,7 +596,7 @@ function new (pciaddress)
         
         local dsize = descriptors[i].size or assert(false, "descriptor size not given")
         local doptions = nil
-	
+  
         if i == #descriptors then --set EOP for last descriptor
           doptions = bits({eop=24})
         else
@@ -622,7 +622,9 @@ function new (pciaddress)
 
         --set vlan field, vle bit for all data descriptors (DS says they are valid only for 1st desc)
         --But testing shows 3000 TOTC instead of correct TOTC if the fields are not set for descs > 1
-        doptions = doptions + vlan_field                                
+        if vlan ~= nil then
+          doptions = doptions + vlan_field                                
+        end
 
         txdesc[tdt].data.options = doptions 
       
@@ -877,8 +879,8 @@ function new (pciaddress)
      
       if receive then
          --print "adding receive buffers..."
-         for i = 1, rx_available() do
-            add_rxbuf(buffers_phy + 8192) --shouldn't overlap with tx's buffer ;-)
+         for i = 1, 3 do --rx_available() do
+            add_rxbuf(buffers_phy + 8192 + 5000*(i-1) ) --shouldn't overlap with tx's buffer ;-)
          end
          flush_rx()
       end
@@ -906,16 +908,29 @@ function new (pciaddress)
          print("Expected "..txeth.." packet(s) transmitted but measured "..txhardware)
       end
 
---      if size==4096 then
---        print "DBG: verifying received packet data for size==4096 :"
---        local mem = protected("uint8_t", buffers._ptr, 8192, size) --for accessing rx buf
---        local r = M.receive()
---        print(r)
---        for i=0, size-1 do
---          io.write("buffers["..tostring(i).."] = "..bit.tohex(tonumber(buffers[i])).." | ")
---          io.write("mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i])).."\n")
---        end
---      end
+      local num_pkts = txhardware
+      local hdr_len  = nil
+
+      if udp==nil and ipv6==nil then --IPv4 + TCP
+         hdr_len = 54
+      end
+
+        print "DBG: verifying received packet data :"
+        print "pkts = ["
+        for pkt=1, num_pkts do
+          --print("\nDBG: rx packet "..tostring(pkt).." : ")
+          io.write("[ ")
+          local mem = protected("uint8_t", buffers._ptr, 8192 + 5000*(pkt-1), hdr_len+mss)
+          --local r = M.receive()
+          --print(r)
+          for i=0, hdr_len+mss-1 do
+--            io.write("buffers["..tostring(i).."] = "..bit.tohex(tonumber(buffers[i])).." | ")
+--            io.write("mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i])).."\n")
+           io.write("0x"..bit.tohex(tonumber(mem[i]))..", ")
+          end
+          io.write(" ],\n")
+        end
+        print " ]"
 
       pcie_master_reset() --force clearing of pending descriptors
       --M.tx_diagnostics()
@@ -983,7 +998,7 @@ function new (pciaddress)
 
     --generate tcp/udp payload
     for i = 0, (size - hdr_len -1), 1 do
-        buffers[hdr_len + i] = 41 --char 'A'
+        buffers[hdr_len + i] = 0x41 --char 'A'
     end
 
 
