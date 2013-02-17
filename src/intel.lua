@@ -29,10 +29,9 @@ ffi.cdef[[
 
          // RX writeback descriptor written by hardware.
          struct rx_desc_wb {
-            // uint32_t rss;
-            uint16_t checksum;
-            uint16_t id;
             uint32_t mrq;
+            uint16_t id;
+            uint16_t checksum;
             uint32_t status;
             uint16_t length;
             uint16_t vlan;
@@ -340,8 +339,8 @@ function new (pciaddress)
       -- NOTE: RDT points to the next unused descriptor
       rxdesc[rdt].data.address = address
       rxdesc[rdt].data.dd = 0
-      rdt = (rdt + 1) % num_descriptors
       rxbuffers[rdt] = address
+      rdt = (rdt + 1) % num_descriptors
       return true
    end M.add_rxbuf = add_rxbuf
 
@@ -618,10 +617,12 @@ function new (pciaddress)
           assert(false, "something's wrong ;-)")
         end
 
---        print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
+        print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
 
         --set vlan field, vle bit for all data descriptors (DS says they are valid only for 1st desc)
         --But testing shows 3000 TOTC instead of correct TOTC if the fields are not set for descs > 1
+        --XXX the received packet is garbage when using vlan + multiple desc (problem doesn't occur when using vlan alone
+        --    or multiple desc alone)
         if vlan ~= nil then
           doptions = doptions + vlan_field                                
         end
@@ -877,9 +878,11 @@ function new (pciaddress)
       --M.print_status()
       --M.tx_diagnostics()
      
+      txeth = txeth + math.ceil(size / mss)
+
       if receive then
          --print "adding receive buffers..."
-         for i = 1, 3 do --rx_available() do
+         for i = 1, txeth do --rx_available() do
             add_rxbuf(buffers_phy + 8192 + 5000*(i-1) ) --shouldn't overlap with tx's buffer ;-)
          end
          flush_rx()
@@ -888,13 +891,12 @@ function new (pciaddress)
       --print "adding tso test buffer..."
       -- Transmit a packet with TSO and count expected ethernet transmits.
       M.add_tso_test_buffer(size, mss, ipv6, udp, multi, vlan)
-      txeth = txeth + math.ceil(size / mss)
       
       --print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
       C.usleep(100000) -- wait for 100ms transmit --WARNING: if the delay is reduced(say, 10ms) will cause NIC lockup
       M.clear_tx()
-      M.clear_rx()
+      --M.clear_rx()
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
       print("[After]")
@@ -916,6 +918,15 @@ function new (pciaddress)
       end
 
         print "DBG: verifying received packet data :"
+
+        assert(rdt > 0 and rdt < num_descriptors, "0 < rdt < num_descriptors")
+        print("rxdesc[rdt-1].wb.mrq = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.mrq)))
+        print("rxdesc[rdt-1].wb.id  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.id)))
+        print("rxdesc[rdt-1].wb.CS  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.checksum)))
+        print("rxdesc[rdt-1].wb.STA = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.status)))
+        print("rxdesc[rdt-1].wb.LEN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.length)))
+        print("rxdesc[rdt-1].wb.VLN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.vlan)))
+
         print "pkts = ["
         for pkt=1, num_pkts do
           --print("\nDBG: rx packet "..tostring(pkt).." : ")
@@ -931,6 +942,8 @@ function new (pciaddress)
           io.write(" ],\n")
         end
         print " ]"
+
+      M.clear_rx()
 
       pcie_master_reset() --force clearing of pending descriptors
       --M.tx_diagnostics()
