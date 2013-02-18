@@ -67,10 +67,10 @@ for _,device in ipairs(pci.suitable_devices()) do
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=2})
---   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, multi=3" -- max frame size = 1500 (54 + 1442 + 4)
---   nic.init()
---   nic.reset_stats()
---   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=3})
+   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, multi=3" -- max frame size = 1500 (54 + 1442 + 4)
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=3})
 --   print "\nNIC tx+rx loopback tso test - UDP, IPv4, size=4096, mss=1454, multi=2" -- max frame size = 1500 (42 + 1454 + 4)
 --   nic.init()
 --   nic.reset_stats()
@@ -97,18 +97,18 @@ for _,device in ipairs(pci.suitable_devices()) do
 --   nic.selftest_tso({udp=true, ipv6=true, size=4096, mss=1434, loopback=true, receive=true, multi=3})
 ----   
 ----   --VLAN tests
---   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, vlan={pcp=2, cfi=0, vid=19}"
---   nic.init()
---   nic.reset_stats()
---   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, vlan={pcp=2, cfi=0, vid=19}})
+   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, vlan={pcp=2, cfi=0, vid=19}"
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, vlan={pcp=2, cfi=0, vid=19}})
 --   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, multi=2, vlan={pcp=2, cfi=0, vid=19}"
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=2, vlan={pcp=2, cfi=0, vid=19}})
---   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, multi=3, vlan={pcp=2, cfi=0, vid=19}"
---   nic.init()
---   nic.reset_stats()
---   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=3, vlan={pcp=2, cfi=0, vid=19}})
+   print "\nNIC tx+rx loopback tso test - TCP, IPv4, size=4096, mss=1442, multi=3, vlan={pcp=2, cfi=0, vid=19}"
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({size=4096, mss=1442, loopback=true, receive=true, multi=3, vlan={pcp=2, cfi=0, vid=19}})
 --
 --   print "\nNIC tx+rx loopback tso test - UDP, IPv4, size=4096, mss=1454, vlan={pcp=2, cfi=0, vid=19}"
 --   nic.init()
