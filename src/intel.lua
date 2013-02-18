@@ -317,7 +317,7 @@ function new (pciaddress)
          })
       regs[RFCTL] = bits({EXSTEN=15})  -- Extended RX writeback descriptor format
       regs[RXDCTL] = bits({ GRAN=24, PTHRESH1=1, HTHRESH1=9, WTHRESH1=17 })
-      regs[RXCSUM] = 0                 -- Disable checksum offload - not needed
+      regs[RXCSUM] = bits({ IPOFLD=8, TUOFLD=9, CRCOFL=11, IPCSE=12 })          --ENABLE 
       regs[RADV] = 1     --  1 * 1us rx interrupt absolute delay
       regs[RDTR] = 10    -- 10 * 1us rx interrupt delay timer
       regs[RDLEN] = num_descriptors * ffi.sizeof("union rx")
@@ -913,8 +913,14 @@ function new (pciaddress)
       local num_pkts = txhardware
       local hdr_len  = nil
 
-      if udp==nil and ipv6==nil then --IPv4 + TCP
+      if udp==nil and ipv6==nil then     --TCP + IPv4
          hdr_len = 54
+      elseif udp~=nil and ipv6==nil then --UDP + IPv4
+         hdr_len = 42
+      elseif udp==nil and ipv6~=nil then --TCP + IPv6
+         hdr_len = 74
+      elseif udp~=nil and ipv6~=nil then --UDP + IPv6
+         hdr_len = 62
       end
 
         print "DBG: verifying received packet data :"
