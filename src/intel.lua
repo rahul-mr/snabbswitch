@@ -488,6 +488,9 @@ function new (pciaddress)
       local plen_off = nil -- IP payload length field offset
       local prot_off = nil -- IP protocol field offset
       local pkt_len  = nil -- IP packet length 
+      local addrs_offset = nil --IP source address field offset
+      local addrs_bytes  = nil --Total number of bytes used by IP address fields
+      local cs_proto = nil -- protocol field used in checksum calculation
 
       if ver == 0x40 then --IPv4
         ctx.tucmd = bits({ip=1}, ctx.tucmd) --IPv4 flag
@@ -500,6 +503,8 @@ function new (pciaddress)
         plen_off = 2
         prot_off = 9
         pkt_len  = bit.bor( bit.lshift(mem[plen_off], 8), mem[plen_off+1] )
+        addrs_offset = 12
+        addrs_bytes  = 8
 
       elseif ver == 0x60 then--IPv6
         ipcs_off = 2 -- this will be ignored when flags are set (hopefully) otherwise IP Flow label field will get corrupted
@@ -507,6 +512,8 @@ function new (pciaddress)
         plen_off = 4
         prot_off = 6
         pkt_len  = 40 + bit.bor( bit.lshift(mem[plen_off], 8), mem[plen_off+1] )
+        addrs_offset = 8
+        addrs_bytes = 32
 
       else
         assert(false, "Invalid IP version/Unknown format")
@@ -521,7 +528,9 @@ function new (pciaddress)
       ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
       ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
 
-      if mem[prot_off] == 0x06 then -- TCP specific
+      local protocol = mem[prot_off]
+
+      if protocol == 0x06 then -- TCP specific
         ctx.tucso = frame_len + hdr_len + 16 --TCP checksum offset
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
@@ -531,7 +540,7 @@ function new (pciaddress)
         ctx.hdrlen = frame_len + hdr_len + tcp_len
         ctx.paylen = pkt_len - hdr_len - tcp_len
 
-      elseif mem[prot_off] == 0x11 then --UDP specific
+      elseif protocol == 0x11 then --UDP specific
         ctx.tucso  = frame_len + hdr_len + 6 --UDP checksum offset
         ctx.hdrlen = frame_len + hdr_len + 8
         ctx.paylen = pkt_len - hdr_len - 8
@@ -541,6 +550,31 @@ function new (pciaddress)
       end
 
       --XXX the partial pseudo-header's TCP/UDP checksum may have to be re-calculated (BTW use NIC's rx checksum offload)
+
+      --set_checksum(mem._ptr, ver, ctx.tucso - frame_len, protocol)
+
+      if ver == 0x40 and protocol == 0x06 then -- IPv4 + TCP
+        cs_proto = 0x0600
+      end 
+ 
+      local checksum = 0     
+ 
+      for i=addrs_offset, addrs_offset + addrs_bytes - 2, 2 do
+        print("DBG: checksum: Adding: 0x"..bit.tohex(tonumber( bit.bor(bit.lshift(mem[i+1], 8), mem[i]) )))
+        checksum = checksum + bit.bor(bit.lshift(mem[i+1], 8), mem[i])
+      end
+ 
+      checksum = checksum + cs_proto
+      print("DBG: checksum = "..bit.tohex(tonumber(checksum)))
+      checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
+ 
+      checksum = checksum + bit.rshift(checksum, 16)
+ 
+      print("DBG: mem[0] = 0x"..bit.tohex(tonumber(bit.band(checksum, 0xff))))
+      print("DBG: mem[1] = 0x"..bit.tohex(tonumber(bit.band(bit.rshift(checksum,8), 0xff))))
+     
+      mem[ctx.tucso - frame_len]   = bit.band(checksum, 0xff) 
+      mem[ctx.tucso - frame_len+1] = bit.band(bit.rshift(checksum,8), 0xff)
 
       txdesc[tdt].ctx.tucse = ctx.tucse
       txdesc[tdt].ctx.tucso = ctx.tucso
@@ -974,8 +1008,8 @@ function new (pciaddress)
       packet = { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x08, 0x00, 0x45, 0x00,
                  0x0F, 0xF2, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x6D, 0x03, 0x7F, 0x00, 0x00, 0x01, 0x7F, 0x00,
                  0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
-                 --0x20, 0x00, 0x59, 0x8A, 0x00, 0x00 } --orig
-                   0x20, 0x00, 0xFE, 0x08, 0x00, 0x00 }
+                 0x20, 0x00, 0x59, 0x8A, 0x00, 0x00 } --orig
+                 --0x20, 0x00, 0xFE, 0x08, 0x00, 0x00 }
       hdr_len = 54
 
     elseif size == 4096 and ipv6 == nil and udp ~= nil then --UDP/IPv4 with size 4096
