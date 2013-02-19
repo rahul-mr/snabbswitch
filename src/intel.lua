@@ -550,15 +550,7 @@ function new (pciaddress)
       else
         assert(false, "Invalid/Unimplemented IP data protocol")
       end
-
-      --XXX the partial pseudo-header's TCP/UDP checksum may have to be re-calculated (BTW use NIC's rx checksum offload)
-
-      --set_checksum(mem._ptr, ver, ctx.tucso - frame_len, protocol)
-
---      if ver == 0x40 and protocol == 0x06 then -- IPv4 + TCP
---        cs_proto = 0x0600
---      end 
- 
+       
       local checksum = 0     
  
       for i=addrs_offset, addrs_offset + addrs_bytes - 2, 2 do
@@ -969,14 +961,14 @@ function new (pciaddress)
         print("rxdesc[rdt-1].wb.LEN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.length)))
         print("rxdesc[rdt-1].wb.VLN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.vlan)))
 
-        print "pkts = ["
+        print "pkt headers(78) = ["
         for pkt=1, num_pkts do
           --print("\nDBG: rx packet "..tostring(pkt).." : ")
           io.write("[ ")
           local mem = protected("uint8_t", buffers._ptr, 8192 + 5000*(pkt-1), hdr_len+mss)
           --local r = M.receive()
           --print(r)
-          for i=0, hdr_len+mss-1 do
+          for i=0, 78-1 do --hdr_len+mss-1 do
 --            io.write("buffers["..tostring(i).."] = "..bit.tohex(tonumber(buffers[i])).." | ")
 --            io.write("mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i])).."\n")
            io.write("0x"..bit.tohex(tonumber(mem[i]))..", ")
