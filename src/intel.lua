@@ -499,7 +499,7 @@ function new (pciaddress)
         mem[ipcs_off + 1] = 0   --clear IP header checksum field L
         hdr_len = 4 * bit.band(mem[0], 0x0f) --read IHL field
         assert(hdr_len >= 20, "Invalid value for IPv4 IHL field")
-        ctx.ipcse = frame_len + hdr_len
+        ctx.ipcse = frame_len + hdr_len - 1
         plen_off = 2
         prot_off = 9
         pkt_len  = bit.bor( bit.lshift(mem[plen_off], 8), mem[plen_off+1] )
@@ -539,11 +539,13 @@ function new (pciaddress)
         assert(tcp_len >= 20 , "Invalid value for TCP data offset field")
         ctx.hdrlen = frame_len + hdr_len + tcp_len
         ctx.paylen = pkt_len - hdr_len - tcp_len
+        cs_proto = 0x0600
 
       elseif protocol == 0x11 then --UDP specific
         ctx.tucso  = frame_len + hdr_len + 6 --UDP checksum offset
         ctx.hdrlen = frame_len + hdr_len + 8
         ctx.paylen = pkt_len - hdr_len - 8
+        cs_proto = 0x1100
 
       else
         assert(false, "Invalid/Unimplemented IP data protocol")
@@ -553,9 +555,9 @@ function new (pciaddress)
 
       --set_checksum(mem._ptr, ver, ctx.tucso - frame_len, protocol)
 
-      if ver == 0x40 and protocol == 0x06 then -- IPv4 + TCP
-        cs_proto = 0x0600
-      end 
+--      if ver == 0x40 and protocol == 0x06 then -- IPv4 + TCP
+--        cs_proto = 0x0600
+--      end 
  
       local checksum = 0     
  
