@@ -528,7 +528,7 @@ function new (pciaddress)
       ctx.ipcso = frame_len + ipcs_off
 
       ctx.tucss = frame_len + hdr_len  -- IP payload (TCP/UDP payload) start
-      ctx.tucse = frame_len + pkt_len  -- IP payload (TCP/UDP payload) end
+      ctx.tucse = frame_len + pkt_len - 1 -- IP payload (TCP/UDP payload) end
 
       local protocol = mem[prot_off]
 
@@ -603,21 +603,12 @@ function new (pciaddress)
 --      print("ctx.paylen= " ..  bit.tohex(tonumber(ctx.paylen)) .." | ".. tonumber(ctx.paylen))
 --
 --      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
---      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
+--      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.optionsH))).." "..bit.tohex(tonumber(txdesc[tdt].data.optionsL )) )
 --
 
       tdt = (tdt + 1) % num_descriptors --next for data descriptors
 
       assert(#descriptors > 0, "need atleast 1 descriptor")
-
-      local vlan_field = nil
-
-      if vlan ~= nil then --set vlan field, vle bit 
-        assert(vlan.pcp and vlan.cfi and vlan.vid, "vlan - pcp, cfi, vid keys must be set")
-        vlan_field = bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ) * (2^48)  + bits({vle=30})
-      else
-        vlan_field = 0
-      end
 
       for i = 1, #descriptors do
 
@@ -635,11 +626,9 @@ function new (pciaddress)
           doptionsL = bit.bor(dsize, txdesc_flags, doptionsL)
         elseif ver == 0x40 then --IPv4
           doptionsL = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptionsL)
-           --, ixsm=40, txsm=41 (damn, bit lib doesn't support >32 bits)
           doptionsH = bit.bor(bits({ ixsm = 40-32, txsm = 41-32 }), doptionsH)
         elseif ver == 0x60 then --IPv6
           doptionsL = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptionsL) --ixsm ignored 
-           --, txsm=41 (damn, bit lib doesn't support >32 bits)
           doptionsH = bit.bor(bits({ txsm = 41-32 }), doptionsH)
            
         else
@@ -650,8 +639,6 @@ function new (pciaddress)
 
         --set vlan field, vle bit for all data descriptors (DS says they are valid only for 1st desc)
         --But testing shows 3000 TOTC instead of correct TOTC if the fields are not set for descs > 1
-        --XXX the received packet is garbage when using vlan + multiple desc (problem doesn't occur when using vlan alone
-        --    or multiple desc alone)
         if vlan ~= nil then
           doptionsL = bit.bor(bits({vle=30}), doptionsL)
           doptionsH = bit.bor(bit.lshift(bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ), 16),
@@ -660,15 +647,14 @@ function new (pciaddress)
 
         print("DBG: dsize = "..tostring(dsize).." (0x"..bit.tohex(dsize)..")")
        
-        --print("DBG: Make doptions L= 0x "..bit.tohex(tonumber( bit.bor(doptions%(2^32), dsize) )))
-
         print("DBG: doptions = 0x "..bit.tohex(tonumber(doptionsH)).." "..bit.tohex(tonumber(doptionsL)))
 
         txdesc[tdt].data.optionsL = doptionsL
         txdesc[tdt].data.optionsH = doptionsH
-      
---      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
---      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
+
+ --      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
+--      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.optionsH)).." "..bit.tohex(tonumber(txdesc[tdt].data.optionsL )) )
+     
         tdt = (tdt + 1) % num_descriptors
       end
 
