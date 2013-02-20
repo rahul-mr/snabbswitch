@@ -48,7 +48,8 @@ ffi.cdef[[
          // TX Extended Data Descriptor written by software.
          struct tx_desc {
             uint64_t address;
-            uint64_t options;
+            uint32_t optionsL;
+            uint32_t optionsH;
          } __attribute__((packed));
 
 
@@ -434,7 +435,8 @@ function new (pciaddress)
    -- Enqueue a transmit descriptor to send a packet.
    local function add_txbuf (address, size)
       txdesc[tdt].data.address = address
-      txdesc[tdt].data.options = bit.bor(size, txdesc_flags)
+      txdesc[tdt].data.optionsL = bit.bor(size, txdesc_flags)
+      txdesc[tdt].data.optionsH = 0
       tdt = (tdt + 1) % num_descriptors
    end M.add_txbuf = add_txbuf
 
@@ -622,27 +624,23 @@ function new (pciaddress)
         txdesc[tdt].data.address = descriptors[i].address or assert(false, "descriptor address not given")
         
         local dsize = descriptors[i].size or assert(false, "descriptor size not given")
-        local doptions = nil
+        local doptionsL = 0
+        local doptionsH = 0
   
         if i == #descriptors then --set EOP for last descriptor
-          doptions = bits({eop=24})
-        else
-          doptions = 0
+          doptionsL = bits({eop=24})
         end
 
         if ctx.paylen < mss then --why did you even call this function :-P
-          --doptions = bit.bor(dsize, txdesc_flags, doptions)
-          doptions = bit.bor( txdesc_flags, doptions)
+          doptionsL = bit.bor(dsize, txdesc_flags, doptionsL)
         elseif ver == 0x40 then --IPv4
-          --doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
-          doptions = bit.bor(bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
+          doptionsL = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptionsL)
            --, ixsm=40, txsm=41 (damn, bit lib doesn't support >32 bits)
-          doptions = doptions + bits({ ixsm = 40-32, txsm = 41-32 }) * (2^32)
+          doptionsH = bit.bor(bits({ ixsm = 40-32, txsm = 41-32 }), doptionsH)
         elseif ver == 0x60 then --IPv6
-          --doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
-          doptions = bit.bor(bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
+          doptionsL = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptionsL) --ixsm ignored 
            --, txsm=41 (damn, bit lib doesn't support >32 bits)
-          doptions = doptions + bits({ txsm = 41-32 }) * (2^32)
+          doptionsH = bit.bor(bits({ txsm = 41-32 }), doptionsH)
            
         else
           assert(false, "something's wrong ;-)")
@@ -655,18 +653,19 @@ function new (pciaddress)
         --XXX the received packet is garbage when using vlan + multiple desc (problem doesn't occur when using vlan alone
         --    or multiple desc alone)
         if vlan ~= nil then
-          doptions = doptions + vlan_field                                
+          doptionsL = bit.bor(bits({vle=30}), doptionsL)
+          doptionsH = bit.bor(bit.lshift(bit.bor( bit.lshift(vlan.pcp, 13), bit.lshift(vlan.cfi, 12), vlan.vid ), 16),
+                              doptionsH)
         end
 
         print("DBG: dsize = "..tostring(dsize).." (0x"..bit.tohex(dsize)..")")
        
-        print("DBG: Make doptions L= 0x "..bit.tohex(tonumber( bit.bor(doptions%(2^32), dsize) )))
+        --print("DBG: Make doptions L= 0x "..bit.tohex(tonumber( bit.bor(doptions%(2^32), dsize) )))
 
-        doptions = (doptions/(2^32))*(2^32) + bit.bor(doptions%(2^32), dsize)
-         
-        print("DBG: doptions = 0x "..bit.tohex(tonumber(doptions/(2^32))).." "..bit.tohex(tonumber(doptions%(2^32))))
+        print("DBG: doptions = 0x "..bit.tohex(tonumber(doptionsH)).." "..bit.tohex(tonumber(doptionsL)))
 
-        txdesc[tdt].data.options = doptions 
+        txdesc[tdt].data.optionsL = doptionsL
+        txdesc[tdt].data.optionsH = doptionsH
       
 --      print("DBG: (64) txdesc[tdt] (0) = "..bit.tohex(tonumber(txdesc[tdt].data.address / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.address % (2^32))) )
 --      print("DBG: (64) txdesc[tdt] (1) = "..bit.tohex(tonumber(txdesc[tdt].data.options / (2^32))).." "..bit.tohex(tonumber(txdesc[tdt].data.options % (2^32))) )
