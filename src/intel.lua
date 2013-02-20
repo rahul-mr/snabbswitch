@@ -631,13 +631,16 @@ function new (pciaddress)
         end
 
         if ctx.paylen < mss then --why did you even call this function :-P
-          doptions = bit.bor(dsize, txdesc_flags, doptions)
+          --doptions = bit.bor(dsize, txdesc_flags, doptions)
+          doptions = bit.bor( txdesc_flags, doptions)
         elseif ver == 0x40 then --IPv4
-          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
+          --doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
+          doptions = bit.bor(bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions)
            --, ixsm=40, txsm=41 (damn, bit lib doesn't support >32 bits)
           doptions = doptions + bits({ ixsm = 40-32, txsm = 41-32 }) * (2^32)
         elseif ver == 0x60 then --IPv6
-          doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
+          --doptions = bit.bor(dsize, bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
+          doptions = bit.bor(bits({dtype=20, ifcs=25, tse=26, dext=29}), doptions) --ixsm ignored 
            --, txsm=41 (damn, bit lib doesn't support >32 bits)
           doptions = doptions + bits({ txsm = 41-32 }) * (2^32)
            
@@ -654,6 +657,14 @@ function new (pciaddress)
         if vlan ~= nil then
           doptions = doptions + vlan_field                                
         end
+
+        print("DBG: dsize = "..tostring(dsize).." (0x"..bit.tohex(dsize)..")")
+       
+        print("DBG: Make doptions L= 0x "..bit.tohex(tonumber( bit.bor(doptions%(2^32), dsize) )))
+
+        doptions = (doptions/(2^32))*(2^32) + bit.bor(doptions%(2^32), dsize)
+         
+        print("DBG: doptions = 0x "..bit.tohex(tonumber(doptions/(2^32))).." "..bit.tohex(tonumber(doptions%(2^32))))
 
         txdesc[tdt].data.options = doptions 
       
@@ -1059,6 +1070,10 @@ function new (pciaddress)
       descriptors = { {address = buffers_phy, size = hdr_len}, 
                       {address = buffers_phy + hdr_len, size = size - hdr_len} }
     elseif multi == 3 and size == 4096 then
+      print("DBG: size = "..tostring(size))
+      print("DBG: DD1 size = hdr_len = "..tostring(hdr_len))
+      print("DBG: DD2 size = 1024")
+      print("DBG: DD3 size = size - hdr_len - 1024 = "..tostring(size - hdr_len - 1024))
       descriptors = { {address = buffers_phy, size = hdr_len}, 
                       {address = buffers_phy + hdr_len, size = 1024},
                       {address = buffers_phy + hdr_len + 1024, size = size - hdr_len - 1024} }
