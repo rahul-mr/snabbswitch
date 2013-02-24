@@ -94,17 +94,15 @@ end
 
 SEQ_NUM = 0 --current sequence number
 ACK_NUM = 0 --current acknowledgement number
-CTX_ID  = 0 --current context id
 
 function init()
   SEQ_NUM = 0
   ACK_NUM = 0
-  CTX_ID  = 0
 end
 
 --determine if given packet is {IPv4,IPv6}/{TCP,UDP}
 --returns nil if invalid (ie, not IPv4/v6)
---mem is protected(mem_addrs, ..., size) where size == 23 (14 + 9)
+--mem is protected("uint8_t", mem_addrs, ..., size) where size == 23 (14 + 9)
 function check_packet(mem)
 
     local ret = { }
@@ -113,9 +111,9 @@ function check_packet(mem)
     local proto = nil
 
     if ver == 0x40 then      --IPv4
-        proto = mem[23] 	--14 + 9
+        proto = mem[23]     --14 + 9
     elseif ver == 0x60 then  --IPv6
-        proto = mem[20]		--14 + 6
+        proto = mem[20]        --14 + 6
         ret["ipv6"] = true
     else
         return nil --invalid packet
@@ -132,7 +130,59 @@ function check_packet(mem)
 end
 
 --Generate an IPv6+STT frame 
--- mem is of type ffi.cast("struct frame0 *", ...)
-function gen_stt_frame(mem, pkt_mem, pkt_size)
+-- stt: stt options - dictionary containing following:
+--      mem, dst_mac, src_mac, src_ip, dst_ip, mss, vlan, ctx_id
+--      mem is of type ffi.cast("struct frame0 *", ...)
+--      {src,dst}_{mac,ip} are strings;
+--      ctx_id is of type: uint64_t
+-- pkt: encapsulated packet options - dictionary containing following:
+--      mem, size
+--      mem is of type ffi.cast("uint8_t *", ..., size)
+function gen_stt_frame(stt, pkt)
+    assert(stt and pkt, "stt and pkt cannot be nil")
+    assert(pkt.size > 23, "pkt_size should be >23")
+
+    local pm = protected("uint8_t", pkt.mem, 0, 23)
+    local ver = bit.band(pm[0], 0x60)
+    local proto = nil
+    local hdr_len  = nil -- IP header length
+
+    assert(stt.mem ~= nil, "stt.mem cannot be nil")
+    assert(stt.dst_mac:len() == 6, "dst_mac should have length 6")
+    assert(stt.src_mac:len() == 6, "src_mac should have length 6")
     
+    for i=1, 6 do
+      stt.mem.hdr.eth.dst_mac[i-1] = stt.dst_mac:ubyte(i) 
+      stt.mem.hdr.eth.src_mac[i-1] = stt.src_mac:ubyte(i) 
+    end
+
+    assert(stt.src_ip:len() == 16, "src_ip should have length 16") 
+    assert(stt.dst_ip:len() == 16, "dst_ip should have length 16") 
+
+    for i=1, 16 do
+      stt.mem.hdr.ipv6.dst_ip[i-1] = stt.dst_ip:ubyte(i) 
+      stt.mem.hdr.ipv6.src_ip[i-1] = stt.src_ip:ubyte(i) 
+    end
+
+    stt.mem.stt_hdr.flags  = bits({cs_partial=1}) --gonna be using TSO
+    stt.mem.stt_hdr.mss    = stt.mss or assert(false, "stt.mss must be given")
+    stt.mem.stt_hdr.vlan   = stt.vlan or assert(false, "stt.vlan must be given")
+    stt.mem.stt_hdr.ctx_id = stt.ctx_id or assert(false, "stt.ctx_id must be given")
+
+    if ver == 0x40 then      --IPv4
+        proto = pm[23]     --14 + 9
+        stt.mem.stt_hdr.flags  = bits({ipv4=2}, stt.mem.stt_hdr.flags)
+	stt.mem.stt_hdr.l4_ofs = 14 + 4 * bit.band(pm[14], 0x0f) --IHL field
+    elseif ver == 0x60 then  --IPv6
+        proto = pm[20]        --14 + 6
+	stt.mem.stt_hdr.l4_ofs = 14 + 40
+    else
+        assert(false, "Invalid encapsulated packet")
+    end
+
+    if proto == 0x06 then --TCP
+        stt.mem.stt_hdr.flags = bits({tcp=3}, stt.mem.stt_hdr.flags)
+    --else hopefully some other valid protocol
+    end
+
 end
