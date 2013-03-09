@@ -7,6 +7,7 @@ local test = require("test")
 local memory = require("memory")
 local crc = require("crc")
 
+print "\nCRC-14 Unit tests:\n"
 crc.unittest_crc14()
 
 --assert(C.lock_memory() == 0)

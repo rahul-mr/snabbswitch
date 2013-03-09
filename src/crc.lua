@@ -57,12 +57,12 @@ function crc14()
  
     function M.add_byte(byte)
         assert(byte, "byte can't be nil")
-   	M.crc = bit.bxor(crc14_table[1 + bit.band(bit.bxor(M.crc, byte), 0xFF)], --crc14_table indices 1 to 256
+        M.crc = bit.bxor(crc14_table[1 + bit.band(bit.bxor(M.crc, byte), 0xFF)], --crc14_table indices 1 to 256
                          bit.rshift(M.crc, 8))
     end
 
     function M.generate()
-	return bit.bxor(CRC14_MAX, M.crc)
+        return bit.bxor(CRC14_MAX, M.crc)
     end
 
     function M.reset()
