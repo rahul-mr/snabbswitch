@@ -1074,3 +1074,11 @@ function new (pciaddress)
    return M
 end
 
+--TSO tx+rx loopback test with verification of receive buffers and writebacks.
+--this is useful for STT testing.
+-- for e.g.:
+-- transmit.packets = { { 0x01, ... , 0xdc }, { 0xdd, ... , 0xff } }
+-- receive.packets  = { { 0x01, ... , 0x4f }, { 0x50, ... , 0x9f }, { 0xa0, ... , 0xff } }  
+function unittest_verify_tso(transmit, receive)
+	
+end
