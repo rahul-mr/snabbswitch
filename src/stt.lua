@@ -166,7 +166,7 @@ end
 
 --Generate an IPv6+STT frame in the given pre-allocated buffer 
 -- stt: stt options - dictionary containing following:
---      mem, dst_mac, src_mac, src_ip, dst_ip, mss, vlan, ctx_id
+--      mem, dst_mac, src_mac, src_ip, dst_ip, flags, mss, vlan, ctx_id
 --      mem is of type ffi.cast("struct frame0 *", ...)
 --      {src,dst}_{mac,ip} are strings;
 --      ctx_id is of type: uint64_t
@@ -205,7 +205,7 @@ function gen_stt_frame(stt, pkt)
       stt.mem.hdr.ipv6.src_ip[i-1] = stt.src_ip:byte(i) 
     end
     
-    stt.mem.stt_hdr.flags  = bits({cs_partial=1}) --gonna be using TSO
+    stt.mem.stt_hdr.flags  = stt.flags or bits({cs_partial=1}) --if TSO used, set cs_partial bit
     stt.mem.stt_hdr.mss    = stt.mss or assert(false, "stt.mss must be given")
     stt.mem.stt_hdr.vlan   = stt.vlan or assert(false, "stt.vlan must be given")
     stt.mem.stt_hdr.ctx_id = stt.ctx_id or assert(false, "stt.ctx_id must be given")
