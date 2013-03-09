@@ -78,7 +78,11 @@ ffi.cdef[[
     } __attribute__((packed));
 ]]
 
---CRC-14
+---------
+
+--XXX Move to lib.lua?
+
+--CRC-14 
 --Reference: http://www.w3.org/TR/PNG/#D-CRCAppendix
 
 local CRC14_MAX = 0x3FFF
@@ -140,6 +144,7 @@ function crc14()
 
     return M
 end
+
 ---------------
 -- CONSTANTS --
 ---------------
@@ -149,6 +154,7 @@ ACK_NUM = 0 --current acknowledgement number (serves as identification)
 
 HASH_ALGOS = { crc14 } --XXX Add other hash functions as necessary
 
+get_random_hash = nil --see init()
 
 ---------------
 -- FUNCTIONS --
@@ -156,13 +162,9 @@ HASH_ALGOS = { crc14 } --XXX Add other hash functions as necessary
 
 function init()
   ACK_NUM = 0
+  math.randomseed( tonumber(tostring(os.time()):reverse():sub(1,6)) ) --http://lua-users.org/wiki/MathLibraryTutorial
+  get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --gen_stt_frame() should use the same hash fn between calls 
 end
-
-function get_random_hash()
-    return HASH_ALGOS[ math.random(1, #HASH_ALGOS) ]()
-end
-
-
 
 --Generate an IPv6+STT frame in the given pre-allocated buffer 
 -- stt: stt options - dictionary containing following:
@@ -233,7 +235,7 @@ function gen_stt_frame(stt, pkt)
     --else hopefully some other valid protocol
     end
 
-    for i=0, 3, 1 do
+    for i=0, 3 do
         hash.add_byte(pm[ip_hdr_len + i]) --TCP/UDP source and dest ports (first 4 bytes of IP payload)
     end
     
@@ -241,7 +243,7 @@ function gen_stt_frame(stt, pkt)
         hash.add_byte(pm[src_addr_off + i])
     end
 
-    stt.mem.hdr.seg.src_port = 49152 + hash.generate()
+    stt.mem.hdr.seg.src_port = 49152 + hash.generate() --generate a 14-bit hash
     stt.mem.hdr.seg.dst_port = STT_DST_PORT
     stt.mem.hdr.seg.frame_len = 18 + pkt.size
     stt.mem.hdr.seg.ack_num = ACK_NUM
