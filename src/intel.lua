@@ -1077,8 +1077,59 @@ end
 --TSO tx+rx loopback test with verification of receive buffers and writebacks.
 --this is useful for STT testing.
 -- for e.g.:
--- transmit.packets = { { 0x01, ... , 0xdc }, { 0xdd, ... , 0xff } }
--- receive.packets  = { { 0x01, ... , 0x4f }, { 0x50, ... , 0x9f }, { 0xa0, ... , 0xff } }  
+-- transmit = { buffers = { { 0x00, ... , 0xdc }, { 0xdd, ... , 0xff } },
+--              mss     = 1422
+--              vlan    = { pcp=0, cfi=0, id=0x01 }
+--            }
+-- receive  = { buffers = { { 0x00, ... , 0x6f }, { 0x70, ... , 0xff } }
+--              writebacks  = { { mrq=0x00, id=0x00, checksum=0x00, status=0x00, length=0x70, vlan=0x01 },
+--                              { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x90, vlan=0x01 }
+--                            },
+--            }
 function unittest_verify_tso(transmit, receive)
+	local buf_tail = 0
+	local tx_descs = {} -- transmit descriptors for transmit.buffers
+	local tx_size  = 0  -- total size of transmitted packet
+
+	--copy transmit.buffers to buffers
+	for i=1, #transmit.buffers do
+		tx_descs[1 + #tx_descs] = { address = buffers_phy + buf_tail, size = #transmit.buffers[i] }
+		tx_size = tx_size + #transmit.buffers[i]
+
+		for j=1, #transmit.buffers[i] do
+			buffers[buf_tail] = transmit.buffers[i][j]
+			buf_tail = buf_tail + 1
+		end
+	end
 	
+    M.add_txbuf_tso( tx_descs, tx_size, transmit.mss, buffers._ptr, transmit.vlan )
+
+	local rx_start = buf_tail --offset to start of rx buffers
+
+	--add receive descriptors for receive.packets
+	for i=1, #receive.buffers do
+		M.add_rxbuf( buffers_phy + buf_tail )
+		buf_tail = buf_tail + #receive.buffers[i] --XXX add spacer?
+	end
+
+	M.flush_rx()
+	M.flush_tx()
+	C.usleep(100000) --wait for 100ms so that transmission is completed
+
+	--verify the received packet buffers and writebacks
+	for i=1, #receive.buffers do
+		assert(rxdesc[i-1].wb.mrq      == receive.writebacks[i].mrq,     "rxdesc["..tostring(i-1).."].wb.mrq not equal")
+		assert(rxdesc[i-1].wb.id       == receive.writebacks[i].id,      "rxdesc["..tostring(i-1).."].wb.id not equal")
+		assert(rxdesc[i-1].wb.checksum == receive.writebacks[i].checksum,"rxdesc["..tostring(i-1).."].wb.checksum not equal")
+		assert(rxdesc[i-1].wb.status   == receive.writebacks[i].status,  "rxdesc["..tostring(i-1).."].wb.status not equal")
+		assert(rxdesc[i-1].wb.length   == receive.writebacks[i].length,  "rxdesc["..tostring(i-1).."].wb.length not equal")
+		assert(rxdesc[i-1].wb.vlan     == receive.writebacks[i].vlan,    "rxdesc["..tostring(i-1).."].wb.vlan not equal")
+
+		local mem = protected("uint8_t", buffers._ptr, rx_start, #receive.buffers[i])
+		rx_start = rx_start + #receive.buffers[i]
+
+		for j=1, #receive.buffers[i] do
+			assert(mem[j-1] == receive.buffers[i][j], "receive.buffers["..tostring(i).."]["..tostring(j).."] not equal")
+		end
+	end --for i
 end
