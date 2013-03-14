@@ -1071,65 +1071,124 @@ function new (pciaddress)
     --M.tx_diagnostics()
    end
 
+	function gen_msg(item_str, received, expected, index1, index2)
+		if index1 ~= nil then index1 = "Index: ["..tostring(index1).."]" else index1 = "" end
+		if index2 ~= nil then index1 = index1.."["..tostring(index2).."]" end
+		return string.format("%s Got %s = %s | Expected = %s", index1, item_str, tostring(received), tostring(expected))
+	end
+
+	--TSO tx+rx loopback test with verification of receive buffers and writebacks.
+	--this is useful for STT testing.
+	-- for e.g.:
+	-- transmit = { buffers = { { 0x00, ... , 0xdc }, { 0xdd, ... , 0xff } },
+	--              mss     = 1422
+	--              vlan    = { pcp=0, cfi=0, id=0x01 }
+	--            }
+	-- receive  = { buffers = { { 0x00, ... , 0x6f }, { 0x70, ... , 0xff } }
+	--              writebacks  = { { mrq=0x00, id=0x00, checksum=0x00, status=0x00, length=0x70, vlan=0x01 },
+	--                              { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x90, vlan=0x01 }
+	--                            },
+	--            }
+	function M.unittest_verify_tso(transmit, receive)
+		local buf_tail = 0
+		local tx_descs = {} -- transmit descriptors for transmit.buffers
+		local tx_size  = 0  -- total size of transmitted packet
+
+		pcie_master_reset() -- will force clearing of pending descriptors
+
+		test.waitfor("linkup", M.linkup, 20, 250000)
+
+		print("DBG: unittest_verify_tso: Statistics [Before]")
+		M.update_stats()
+		M.print_stats()
+
+		--copy transmit.buffers to buffers
+		for i=1, #transmit.buffers do
+			tx_descs[1 + #tx_descs] = { address = buffers_phy + buf_tail, size = #transmit.buffers[i] }
+			tx_size = tx_size + #transmit.buffers[i]
+
+			for j=1, #transmit.buffers[i] do
+				buffers[buf_tail] = transmit.buffers[i][j]
+				buf_tail = buf_tail + 1
+			end
+		end
+		
+		M.add_txbuf_tso( tx_descs, tx_size, transmit.mss, buffers._ptr, transmit.vlan )
+
+		local rx_start = buf_tail --offset to start of rx buffers
+
+		--add receive descriptors for receive.packets
+		for i=1, #receive.buffers do
+			M.add_rxbuf( buffers_phy + buf_tail )
+			buf_tail = buf_tail + #receive.buffers[i] --XXX add spacer?
+		end
+
+		M.flush_rx()
+		M.flush_tx()
+		C.usleep(100000) --wait for 100ms so that transmission is completed
+		
+		print("DBG: unittest_verify_tso: Statistics [After]")
+		M.update_stats()
+		M.print_stats()
+
+		--verify the received packet buffers and writebacks
+		for i=1, #receive.buffers do
+			assert(rxdesc[i-1].wb.mrq == receive.writebacks[i].mrq,     
+		  		   gen_msg("mrq", rxdesc[i-1].wb.mrq, receive.writebacks[i].mrq, i))
+
+			assert(rxdesc[i-1].wb.id == receive.writebacks[i].id,
+	  			   gen_msg("id", rxdesc[i-1].wb.id, receive.writebacks[i].id, i))
+
+			assert(rxdesc[i-1].wb.checksum == receive.writebacks[i].checksum,
+				   gen_msg("checksum", rxdesc[i-1].wb.checksum, receive.writebacks[i].checksum, i))
+
+			assert(rxdesc[i-1].wb.status == receive.writebacks[i].status,
+		  		   gen_msg("status", rxdesc[i-1].wb.status, receive.writebacks[i].status, i))
+
+			assert(rxdesc[i-1].wb.length == receive.writebacks[i].length,
+		  		   gen_msg("length", rxdesc[i-1].wb.length, receive.writebacks[i].length, i))
+
+			assert(rxdesc[i-1].wb.vlan == receive.writebacks[i].vlan,
+	  			   gen_msg("vlan", rxdesc[i-1].wb.vlan, receive.writebacks[i].vlan, i))
+
+			local mem = protected("uint8_t", buffers._ptr, rx_start, #receive.buffers[i])
+			rx_start = rx_start + #receive.buffers[i]
+
+			for j=1, #receive.buffers[i] do
+				assert(mem[j-1] == receive.buffers[i][j], 
+					   gen_msg("buffer", mem[j-1], receive.buffers[i][j], i, j))
+			end
+		end --for i
+	end
+
+	--This function tests tso verification
+	function M.selftest_verify_tso()
+		local transmit, receive = {}, {}
+		local hdr_len = 74
+		local size, buf2_size = 4096, 1024
+		local buf2, buf3 = {}, {}
+		
+		--TCP+IPv6
+		transmit.buffers = {{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
+						     0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }}
+
+		transmit.mss = 1500 - (hdr_len + 4) -- note: 4 = CRC length
+		transmit.vlan = { pcp=0, cfi=0, id=0xde }
+
+		for i=1, buf2_size do
+			buf2[1 + #buf2] = 0x41 --char 'A' 	
+		end
+		
+		for i=1, size - buf2_size do
+			buf3[1 + #buf3] = 0x41 --char 'A'
+		end
+		
+		transmit.buffers[2] = buf2
+		transmit.buffers[3] = buf3
+	end
+
    return M
-end
-
---TSO tx+rx loopback test with verification of receive buffers and writebacks.
---this is useful for STT testing.
--- for e.g.:
--- transmit = { buffers = { { 0x00, ... , 0xdc }, { 0xdd, ... , 0xff } },
---              mss     = 1422
---              vlan    = { pcp=0, cfi=0, id=0x01 }
---            }
--- receive  = { buffers = { { 0x00, ... , 0x6f }, { 0x70, ... , 0xff } }
---              writebacks  = { { mrq=0x00, id=0x00, checksum=0x00, status=0x00, length=0x70, vlan=0x01 },
---                              { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x90, vlan=0x01 }
---                            },
---            }
-function unittest_verify_tso(transmit, receive)
-	local buf_tail = 0
-	local tx_descs = {} -- transmit descriptors for transmit.buffers
-	local tx_size  = 0  -- total size of transmitted packet
-
-	--copy transmit.buffers to buffers
-	for i=1, #transmit.buffers do
-		tx_descs[1 + #tx_descs] = { address = buffers_phy + buf_tail, size = #transmit.buffers[i] }
-		tx_size = tx_size + #transmit.buffers[i]
-
-		for j=1, #transmit.buffers[i] do
-			buffers[buf_tail] = transmit.buffers[i][j]
-			buf_tail = buf_tail + 1
-		end
-	end
-	
-    M.add_txbuf_tso( tx_descs, tx_size, transmit.mss, buffers._ptr, transmit.vlan )
-
-	local rx_start = buf_tail --offset to start of rx buffers
-
-	--add receive descriptors for receive.packets
-	for i=1, #receive.buffers do
-		M.add_rxbuf( buffers_phy + buf_tail )
-		buf_tail = buf_tail + #receive.buffers[i] --XXX add spacer?
-	end
-
-	M.flush_rx()
-	M.flush_tx()
-	C.usleep(100000) --wait for 100ms so that transmission is completed
-
-	--verify the received packet buffers and writebacks
-	for i=1, #receive.buffers do
-		assert(rxdesc[i-1].wb.mrq      == receive.writebacks[i].mrq,     "rxdesc["..tostring(i-1).."].wb.mrq not equal")
-		assert(rxdesc[i-1].wb.id       == receive.writebacks[i].id,      "rxdesc["..tostring(i-1).."].wb.id not equal")
-		assert(rxdesc[i-1].wb.checksum == receive.writebacks[i].checksum,"rxdesc["..tostring(i-1).."].wb.checksum not equal")
-		assert(rxdesc[i-1].wb.status   == receive.writebacks[i].status,  "rxdesc["..tostring(i-1).."].wb.status not equal")
-		assert(rxdesc[i-1].wb.length   == receive.writebacks[i].length,  "rxdesc["..tostring(i-1).."].wb.length not equal")
-		assert(rxdesc[i-1].wb.vlan     == receive.writebacks[i].vlan,    "rxdesc["..tostring(i-1).."].wb.vlan not equal")
-
-		local mem = protected("uint8_t", buffers._ptr, rx_start, #receive.buffers[i])
-		rx_start = rx_start + #receive.buffers[i]
-
-		for j=1, #receive.buffers[i] do
-			assert(mem[j-1] == receive.buffers[i][j], "receive.buffers["..tostring(i).."]["..tostring(j).."] not equal")
-		end
-	end --for i
 end
