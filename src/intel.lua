@@ -1089,7 +1089,7 @@ function new (pciaddress)
 	--                              { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x90, vlan=0x01 }
 	--                            },
 	--            }
-	function M.unittest_verify_tso(transmit, receive)
+	function M.verify_tso(transmit, receive)
 		local buf_tail = 0
 		local tx_descs = {} -- transmit descriptors for transmit.buffers
 		local tx_size  = 0  -- total size of transmitted packet
@@ -1098,7 +1098,7 @@ function new (pciaddress)
 
 		test.waitfor("linkup", M.linkup, 20, 250000)
 
-		print("DBG: unittest_verify_tso: Statistics [Before]")
+		print("DBG: verify_tso: Statistics [Before]")
 		M.update_stats()
 		M.print_stats()
 
@@ -1127,7 +1127,7 @@ function new (pciaddress)
 		M.flush_tx()
 		C.usleep(100000) --wait for 100ms so that transmission is completed
 		
-		print("DBG: unittest_verify_tso: Statistics [After]")
+		print("DBG: verify_tso: Statistics [After]")
 		M.update_stats()
 		M.print_stats()
 
@@ -1188,7 +1188,12 @@ function new (pciaddress)
 		
 		transmit.buffers[2] = buf2
 		transmit.buffers[3] = buf3
-	end
+
+		--XXX receive buffers and writebacks
+		
+		M.verify_tso(transmit, receive)
+
+	end --M.selftest_verify_tso()
 
    return M
 end
