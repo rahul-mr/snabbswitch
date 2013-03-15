@@ -1161,36 +1161,61 @@ function new (pciaddress)
 		end --for i
 	end
 
+	--create a copy of the given table
+	function table.copy(t)
+		local u = { }
+		for k, v in pairs(t) do u[k] = v end
+		return setmetatable(u, getmetatable(t))
+	end
+
 	--This function tests tso verification
 	function M.selftest_verify_tso()
 		local transmit, receive = {}, {}
 		local hdr_len = 74
-		local size, buf2_size = 4096, 1024
-		local buf2, buf3 = {}, {}
-		
+		local size, desc2_size = 4096, 1024
+		local vlan_id = 0xde
+		local buf = nil
+		local pkt_fields = { ip_len_h=19, ip_len_l=20, tcp_seq_l=62, tcp_ack_l=66, tcp_cs_h=71, tcp_cs_l=72 } --offsets
+
 		--TCP+IPv6
 		transmit.buffers = {{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
 						     0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-							 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }}
+							 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }, {}, {}}
 
 		transmit.mss = 1500 - (hdr_len + 4) -- note: 4 = CRC length
-		transmit.vlan = { pcp=0, cfi=0, id=0xde }
+		transmit.vlan = { pcp=0, cfi=0, id=vlan_id }
 
-		for i=1, buf2_size do
-			buf2[1 + #buf2] = 0x41 --char 'A' 	
+		buf = transmit.buffers[2]
+
+		for i=1, desc2_size do
+			buf[1 + #buf] = 0x41 --char 'A' 	
 		end
 		
-		for i=1, size - buf2_size do
-			buf3[1 + #buf3] = 0x41 --char 'A'
-		end
-		
-		transmit.buffers[2] = buf2
-		transmit.buffers[3] = buf3
+		buf = transmit.buffers[3]
 
-		--XXX receive buffers and writebacks
-		
+		for i=1, size - desc2_size do
+			buf[1 + #buf] = 0x41 --char 'A'
+		end
+
+		--XXX Fix it
+		local rx_fields = { { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_l=0x00, tcp_ack_l=0x01, tcp_cs_h=0xAB, tcp_cs_l=0xCD },
+						    { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_l=0x01, tcp_ack_l=0x02, tcp_cs_h=0xAB, tcp_cs_l=0xCD },
+							{ ip_len_h=0x04, ip_len_l=0xf8, tcp_seq_l=0x02, tcp_ack_l=0x03, tcp_cs_h=0xAB, tcp_cs_l=0xCD } }
+		--XXX Fix it
+		receive.writebacks = { { mrq=0x00, id=0x00, checksum=0x00, status=0x00, length=0x05dc, vlan=vlan_id },
+						       { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x05dc, vlan=vlan_id },	
+						       { mrq=0x00, id=0x02, checksum=0x00, status=0x00, length=0x0532, vlan=vlan_id } }
+		receive.buffers = {}
+		for i=1, math.ceil(size / transmit.mss) do
+			receive.buffers[i] = table.copy(transmit.buffers[1]) --copy Ethernet+IP+TCP header from transmit
+			--alter the changed fields
+			for k, v in pairs(pkt_fields) do
+				receive.buffers[i][v] = rx_fields[i][k]
+			end
+		end
+
 		M.verify_tso(transmit, receive)
 
 	end --M.selftest_verify_tso()
