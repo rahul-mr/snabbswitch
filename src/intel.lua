@@ -949,22 +949,38 @@ function new (pciaddress)
 
         print "DBG: verifying received packet data :"
 
-        assert(rdt > 0 and rdt < num_descriptors, "0 < rdt < num_descriptors")
-        print("rxdesc[rdt-1].wb.mrq = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.mrq)))
-        print("rxdesc[rdt-1].wb.id  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.id)))
-        print("rxdesc[rdt-1].wb.CS  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.checksum)))
-        print("rxdesc[rdt-1].wb.STA = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.status)))
-        print("rxdesc[rdt-1].wb.LEN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.length)))
-        print("rxdesc[rdt-1].wb.VLN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.vlan)))
+--        assert(rdt > 0 and rdt < num_descriptors, "0 < rdt < num_descriptors")
+--        print("rxdesc[rdt-1].wb.mrq = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.mrq)))
+--        print("rxdesc[rdt-1].wb.id  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.id)))
+--        print("rxdesc[rdt-1].wb.CS  = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.checksum)))
+--        print("rxdesc[rdt-1].wb.STA = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.status)))
+--        print("rxdesc[rdt-1].wb.LEN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.length)))
+--        print("rxdesc[rdt-1].wb.VLN = 0x"..bit.tohex(tonumber(rxdesc[rdt-1].wb.vlan)))
 
-        print "pkt headers(78) = ["
+
+		print "Writebacks:\n"
+
+		for pkt=1, num_pkts do
+			print("rxdesc["..tostring(pkt-1).."].wb.mrq = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.mrq)))
+			print("rxdesc["..tostring(pkt-1).."].wb.id  = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.id)))
+			print("rxdesc["..tostring(pkt-1).."].wb.CS  = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.checksum)))
+			print("rxdesc["..tostring(pkt-1).."].wb.STA = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.status)))
+			print("rxdesc["..tostring(pkt-1).."].wb.LEN = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.length)))
+			print("rxdesc["..tostring(pkt-1).."].wb.VLN = 0x"..bit.tohex(tonumber(rxdesc[pkt-1].wb.vlan)))
+			print("")
+		end
+        --print "pkt headers(78) = ["
+        print "packets = ["
         for pkt=1, num_pkts do
           --print("\nDBG: rx packet "..tostring(pkt).." : ")
           io.write("[ ")
-          local mem = protected("uint8_t", buffers._ptr, 8192 + 5000*(pkt-1), hdr_len+mss)
+          --local mem = protected("uint8_t", buffers._ptr, 8192 + 5000*(pkt-1), hdr_len+mss)
+		  local pkt_size = rxdesc[pkt-1].wb.length
+          local mem = protected("uint8_t", buffers._ptr, 8192 + 5000*(pkt-1), pkt_size)
           --local r = M.receive()
           --print(r)
-          for i=0, 78-1 do --hdr_len+mss-1 do
+          --for i=0, 78-1 do --hdr_len+mss-1 do
+		  for i=0, pkt_size-1 do
 --            io.write("buffers["..tostring(i).."] = "..bit.tohex(tonumber(buffers[i])).." | ")
 --            io.write("mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i])).."\n")
            io.write("0x"..bit.tohex(tonumber(mem[i]))..", ")
@@ -1170,22 +1186,35 @@ function new (pciaddress)
 
 	--This function tests tso verification
 	function M.selftest_verify_tso()
-		local transmit, receive = {}, {}
-		local hdr_len = 74
+
+		--CONFIGURATION START--
 		local size, desc2_size = 4096, 1024
-		local vlan_id = 0xde
+		local vlan_id = 0x00
+		                    --Ethernet+IPv6+TCP headers
+		local tx_header = { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
+						    0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+							0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }
+		
+	    local rx_fields = { { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_1=0x00, tcp_seq_0=0x00, tcp_cs_h=0x4d, tcp_cs_l=0xb3 },
+						    { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_1=0x05, tcp_seq_0=0x8e, tcp_cs_h=0x48, tcp_cs_l=0x25 },
+							{ ip_len_h=0x04, ip_len_l=0xae, tcp_seq_1=0x0b, tcp_seq_0=0x1c, tcp_cs_h=0x5c, tcp_cs_l=0xa4 } }
+		
+		local rx_writebacks = { { mrq=0x00, id=0x00, checksum=0x09df, status=0x060023, length=0x05d8, vlan=vlan_id },
+						        { mrq=0x00, id=0x01, checksum=0x09df, status=0x060023, length=0x05d8, vlan=vlan_id },	
+						        { mrq=0x00, id=0x02, checksum=0x09df, status=0x060023, length=0x04e4, vlan=vlan_id } }
+		--CONFIGURATION END--
+
+		local transmit, receive = {}, {}
 		local buf = nil
-		local pkt_fields = { ip_len_h=19, ip_len_l=20, tcp_seq_l=62, tcp_ack_l=66, tcp_cs_h=71, tcp_cs_l=72 } --offsets
+		local pkt_fields = { ip_len_h=19, ip_len_l=20, tcp_seq_1=61, tcp_seq_0=62, tcp_cs_h=71, tcp_cs_l=72 } --offsets
 
-		--TCP+IPv6
-		transmit.buffers = {{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
-						     0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-							 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-							 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }, {}, {}}
-
-		transmit.mss = 1500 - (hdr_len + 4) -- note: 4 = CRC length
+		transmit.buffers = { tx_header, {}, {} }
+		transmit.mss = 1500 - (#tx_header + 4) -- note: 4 = CRC length
 		transmit.vlan = { pcp=0, cfi=0, id=vlan_id }
+
+		receive.writebacks = rx_writebacks
 
 		buf = transmit.buffers[2]
 
@@ -1199,21 +1228,23 @@ function new (pciaddress)
 			buf[1 + #buf] = 0x41 --char 'A'
 		end
 
-		--XXX Fix it
-		local rx_fields = { { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_l=0x00, tcp_ack_l=0x01, tcp_cs_h=0xAB, tcp_cs_l=0xCD },
-						    { ip_len_h=0x05, ip_len_l=0xa2, tcp_seq_l=0x01, tcp_ack_l=0x02, tcp_cs_h=0xAB, tcp_cs_l=0xCD },
-							{ ip_len_h=0x04, ip_len_l=0xf8, tcp_seq_l=0x02, tcp_ack_l=0x03, tcp_cs_h=0xAB, tcp_cs_l=0xCD } }
-		--XXX Fix it
-		receive.writebacks = { { mrq=0x00, id=0x00, checksum=0x00, status=0x00, length=0x05dc, vlan=vlan_id },
-						       { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x05dc, vlan=vlan_id },	
-						       { mrq=0x00, id=0x02, checksum=0x00, status=0x00, length=0x0532, vlan=vlan_id } }
 		receive.buffers = {}
+		local rx_remain = size
+
 		for i=1, math.ceil(size / transmit.mss) do
 			receive.buffers[i] = table.copy(transmit.buffers[1]) --copy Ethernet+IP+TCP header from transmit
-			--alter the changed fields
+			
 			for k, v in pairs(pkt_fields) do
-				receive.buffers[i][v] = rx_fields[i][k]
+				receive.buffers[i][v] = rx_fields[i][k] -- changed header fields
 			end
+			
+			local count = nil
+			if rx_remain > transmit.mss then count = transmit.mss else count = rx_remain end
+		
+			for j=1, count do
+				receive.buffers[i][1 + #receive.buffers[i]] = 0x41 --char 'A'
+			end
+			rx_remain = rx_remain - transmit.mss
 		end
 
 		M.verify_tso(transmit, receive)

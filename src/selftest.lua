@@ -10,25 +10,25 @@ local crc = require("crc")
 print "\nCRC-14 Unit tests:\n"
 crc.unittest_crc14()
 
---assert(C.lock_memory() == 0)
---
---memory.selftest({verbose = false})
---pci.selftest()
---
---for _,device in ipairs(pci.suitable_devices()) do
--- local pciaddress = device.pciaddress
--- print("selftest: intel device "..pciaddress)
--- if not pci.prepare_device(pciaddress) then
---    error("Failed to prepare PCI device: " .. device.pciaddress)
--- end
--- local nic = intel.new(pciaddress)
---   print "\nNIC transmit test"
---   nic.init()
---   nic.selftest({secs=1})
---  print "\nNIC transmit+receive loopback test"
---  nic.init()
---  nic.reset_stats()
---  nic.selftest({secs=1,loopback=true,receive=true})
+assert(C.lock_memory() == 0)
+
+memory.selftest({verbose = false})
+pci.selftest()
+
+for _,device in ipairs(pci.suitable_devices()) do
+   local pciaddress = device.pciaddress
+   print("selftest: intel device "..pciaddress)
+   if not pci.prepare_device(pciaddress) then
+      error("Failed to prepare PCI device: " .. device.pciaddress)
+   end
+   local nic = intel.new(pciaddress)
+     print "\nNIC transmit test"
+     nic.init()
+     nic.selftest({secs=1})
+    print "\nNIC transmit+receive loopback test"
+    nic.init()
+    nic.reset_stats()
+    nic.selftest({secs=1,loopback=true,receive=true})
 --   print "\nNIC tx tso test - defaults (TCP, IPv4, size=58, mss=1442)" 
 --   nic.init()
 --   nic.reset_stats()
@@ -53,10 +53,10 @@ crc.unittest_crc14()
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({ipv6=true, size=4096, mss=1422})
--- print "\nNIC tx+rx loopback tso test - TCP, IPv6, size=4096, mss=1422" -- max frame size = 1500 (74 + 1422 + 4)
--- nic.init()
--- nic.reset_stats()
--- nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
+   print "\nNIC tx+rx loopback tso test - TCP, IPv6, size=4096, mss=1422" -- max frame size = 1500 (74 + 1422 + 4)
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
 --   print "\nNIC tx tso test - UDP, IPv6, size=4096, mss=1434" -- max frame size = 1500 (62 + 1434 + 4)
 --   nic.init()
 --   nic.reset_stats()
@@ -164,5 +164,5 @@ crc.unittest_crc14()
 --   nic.reset_stats()
 --   nic.selftest_tso({udp=true, ipv6=true, size=2922, mss=1430})
 --   -- nic.selftest({packets=10000000})
---end
+end
 
