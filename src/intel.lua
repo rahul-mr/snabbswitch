@@ -1150,31 +1150,31 @@ function new (pciaddress)
 		M.update_stats()
 		M.print_stats()
 
-        print "packets2 = ["
+--        print "packets2 = ["
 		--verify the received packet buffers and writebacks
 		for i=1, #receive.buffers do
-          io.write("[ ")
-		  		   print(gen_msg("mrq", rxdesc[i-1].wb.mrq, receive.writebacks[i].mrq, i))
+--          io.write("[ ")
+		  		   --print(gen_msg("mrq", rxdesc[i-1].wb.mrq, receive.writebacks[i].mrq, i))
 			assert(rxdesc[i-1].wb.mrq == receive.writebacks[i].mrq,     
 		  		   gen_msg("mrq", rxdesc[i-1].wb.mrq, receive.writebacks[i].mrq, i))
 
-	  			   print(gen_msg("id", rxdesc[i-1].wb.id, receive.writebacks[i].id, i))
+	  			   --print(gen_msg("id", rxdesc[i-1].wb.id, receive.writebacks[i].id, i))
 			assert(rxdesc[i-1].wb.id == receive.writebacks[i].id,
 	  			   gen_msg("id", rxdesc[i-1].wb.id, receive.writebacks[i].id, i))
 
-				   print(gen_msg("checksum", rxdesc[i-1].wb.checksum, receive.writebacks[i].checksum, i))
+				   --print(gen_msg("checksum", rxdesc[i-1].wb.checksum, receive.writebacks[i].checksum, i))
 			assert(rxdesc[i-1].wb.checksum == receive.writebacks[i].checksum,
 				   gen_msg("checksum", rxdesc[i-1].wb.checksum, receive.writebacks[i].checksum, i))
 
-		  		   print(gen_msg("status", rxdesc[i-1].wb.status, receive.writebacks[i].status, i))
+		  		   --print(gen_msg("status", rxdesc[i-1].wb.status, receive.writebacks[i].status, i))
 			assert(rxdesc[i-1].wb.status == receive.writebacks[i].status,
 		  		   gen_msg("status", rxdesc[i-1].wb.status, receive.writebacks[i].status, i))
 
-		  		   print(gen_msg("length", rxdesc[i-1].wb.length, receive.writebacks[i].length, i))
+		  		   --print(gen_msg("length", rxdesc[i-1].wb.length, receive.writebacks[i].length, i))
 			assert(rxdesc[i-1].wb.length == receive.writebacks[i].length,
 		  		   gen_msg("length", rxdesc[i-1].wb.length, receive.writebacks[i].length, i))
 
-	  			   print(gen_msg("vlan", rxdesc[i-1].wb.vlan, receive.writebacks[i].vlan, i))
+	  			   --print(gen_msg("vlan", rxdesc[i-1].wb.vlan, receive.writebacks[i].vlan, i))
 			assert(rxdesc[i-1].wb.vlan == receive.writebacks[i].vlan,
 	  			   gen_msg("vlan", rxdesc[i-1].wb.vlan, receive.writebacks[i].vlan, i))
 
@@ -1182,13 +1182,13 @@ function new (pciaddress)
 			rx_start = rx_start + 8192 --#receive.buffers[i]
 
 			for j=1, #receive.buffers[i] do
-			   io.write("0x"..bit.tohex(tonumber(mem[j-1]))..", ")
---				assert(mem[j-1] == receive.buffers[i][j], 
---					   gen_msg("buffer", mem[j-1], receive.buffers[i][j], i, j))
+--			   io.write("0x"..bit.tohex(tonumber(mem[j-1]))..", ")
+				assert(mem[j-1] == receive.buffers[i][j], 
+					   gen_msg("buffer", mem[j-1], receive.buffers[i][j], i, j))
 			end
-          io.write(" ],\n")
+--          io.write(" ],\n")
 		end --for i
-        print " ]"
+--        print " ]"
 
 		M.clear_rx()
 		pcie_master_reset()
