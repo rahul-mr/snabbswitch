@@ -22,9 +22,9 @@ for _,device in ipairs(pci.suitable_devices()) do
       error("Failed to prepare PCI device: " .. device.pciaddress)
    end
    local nic = intel.new(pciaddress)
-     print "\nNIC transmit test"
-     nic.init()
-     nic.selftest({secs=1})
+--     print "\nNIC transmit test"
+--     nic.init()
+--     nic.selftest({secs=1})
     print "\nNIC transmit+receive loopback test"
     nic.init()
     nic.reset_stats()
@@ -57,6 +57,10 @@ for _,device in ipairs(pci.suitable_devices()) do
    nic.init()
    nic.reset_stats()
    nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
+   print "\nNIC selftest_verify_tso()"
+   nic.init()
+   nic.reset_stats()
+   nic.selftest_verify_tso()
 --   print "\nNIC tx tso test - UDP, IPv6, size=4096, mss=1434" -- max frame size = 1500 (62 + 1434 + 4)
 --   nic.init()
 --   nic.reset_stats()
