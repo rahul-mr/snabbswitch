@@ -25,10 +25,10 @@ for _,device in ipairs(pci.suitable_devices()) do
 --     print "\nNIC transmit test"
 --     nic.init()
 --     nic.selftest({secs=1})
-    print "\nNIC transmit+receive loopback test"
-    nic.init()
-    nic.reset_stats()
-    nic.selftest({secs=1,loopback=true,receive=true})
+--    print "\nNIC transmit+receive loopback test"
+--    nic.init()
+--    nic.reset_stats()
+--    nic.selftest({secs=1,loopback=true,receive=true})
 --   print "\nNIC tx tso test - defaults (TCP, IPv4, size=58, mss=1442)" 
 --   nic.init()
 --   nic.reset_stats()
@@ -53,14 +53,16 @@ for _,device in ipairs(pci.suitable_devices()) do
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({ipv6=true, size=4096, mss=1422})
-   print "\nNIC tx+rx loopback tso test - TCP, IPv6, size=4096, mss=1422" -- max frame size = 1500 (74 + 1422 + 4)
-   nic.init()
-   nic.reset_stats()
-   nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
-   print "\nNIC selftest_verify_tso()"
+--   print "\nNIC tx+rx loopback tso test - TCP, IPv6, size=4096, mss=1422" -- max frame size = 1500 (74 + 1422 + 4)
+--   nic.init()
+--   nic.reset_stats()
+--   nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
+   for i = 1, 10 do
+   print("\nNIC selftest_verify_tso(): Count: "..tostring(i))
    nic.init()
    nic.reset_stats()
    nic.selftest_verify_tso()
+   end
 --   print "\nNIC tx tso test - UDP, IPv6, size=4096, mss=1434" -- max frame size = 1500 (62 + 1434 + 4)
 --   nic.init()
 --   nic.reset_stats()

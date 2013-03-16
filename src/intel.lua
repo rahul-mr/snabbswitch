@@ -556,18 +556,18 @@ function new (pciaddress)
       local checksum = 0     
  
       for i=addrs_offset, addrs_offset + addrs_bytes - 2, 2 do
-        print("DBG: checksum: Adding: 0x"..bit.tohex(tonumber( bit.bor(bit.lshift(mem[i+1], 8), mem[i]) )))
+        --print("DBG: checksum: Adding: 0x"..bit.tohex(tonumber( bit.bor(bit.lshift(mem[i+1], 8), mem[i]) )))
         checksum = checksum + bit.bor(bit.lshift(mem[i+1], 8), mem[i])
       end
  
       checksum = checksum + cs_proto
-      print("DBG: checksum = "..bit.tohex(tonumber(checksum)))
+      --print("DBG: checksum = "..bit.tohex(tonumber(checksum)))
       checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
  
       checksum = checksum + bit.rshift(checksum, 16)
  
-      print("DBG: mem[0] = 0x"..bit.tohex(tonumber(bit.band(checksum, 0xff))))
-      print("DBG: mem[1] = 0x"..bit.tohex(tonumber(bit.band(bit.rshift(checksum,8), 0xff))))
+      --print("DBG: mem[0] = 0x"..bit.tohex(tonumber(bit.band(checksum, 0xff))))
+      --print("DBG: mem[1] = 0x"..bit.tohex(tonumber(bit.band(bit.rshift(checksum,8), 0xff))))
      
       mem[ctx.tucso - frame_len]   = bit.band(checksum, 0xff) 
       mem[ctx.tucso - frame_len+1] = bit.band(bit.rshift(checksum,8), 0xff)
@@ -635,7 +635,7 @@ function new (pciaddress)
           assert(false, "something's wrong ;-)")
         end
 
-        print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
+        --print("DBG: CTRL.VME bit = "..bit.tohex( bit.band(regs[CTRL], bits({VME=30})) ))
 
         --set vlan field, vle bit for all data descriptors (DS says they are valid only for 1st desc)
         --But testing shows 3000 TOTC instead of correct TOTC if the fields are not set for descs > 1
@@ -645,9 +645,9 @@ function new (pciaddress)
                               doptionsH)
         end
 
-        print("DBG: dsize = "..tostring(dsize).." (0x"..bit.tohex(dsize)..")")
+        --print("DBG: dsize = "..tostring(dsize).." (0x"..bit.tohex(dsize)..")")
        
-        print("DBG: doptions = 0x "..bit.tohex(tonumber(doptionsH)).." "..bit.tohex(tonumber(doptionsL)))
+        --print("DBG: doptions = 0x "..bit.tohex(tonumber(doptionsH)).." "..bit.tohex(tonumber(doptionsL)))
 
         txdesc[tdt].data.optionsL = doptionsL
         txdesc[tdt].data.optionsH = doptionsH
@@ -1105,7 +1105,8 @@ function new (pciaddress)
 	--                              { mrq=0x00, id=0x01, checksum=0x00, status=0x00, length=0x90, vlan=0x01 }
 	--                            },
 	--            }
-	function M.verify_tso(transmit, receive)
+	-- statistics = { TPR=3, TPT=3 }
+	function M.verify_tso(transmit, receive, statistics)
 		local buf_tail = 0
 		local tx_descs = {} -- transmit descriptors for transmit.buffers
 		local tx_size  = 0  -- total size of transmitted packet
@@ -1115,11 +1116,10 @@ function new (pciaddress)
 
 		test.waitfor("linkup", M.linkup, 20, 250000)
 
-		print("DBG: verify_tso: Statistics [Before]")
+--		print("DBG: verify_tso: Statistics [Before]")
 		M.update_stats()
-		M.print_stats()
-
-	
+--		M.print_stats()
+		
 		--copy transmit.buffers to buffers
 		for i=1, #transmit.buffers do
 			tx_descs[1 + #tx_descs] = { address = buffers_phy + buf_tail, size = #transmit.buffers[i] }
@@ -1146,10 +1146,14 @@ function new (pciaddress)
 		C.usleep(100000) --wait for 100ms so that transmission is completed
 		M.clear_tx()
 
-		print("DBG: verify_tso: Statistics [After]")
+--		print("DBG: verify_tso: Statistics [After]")
 		M.update_stats()
 		M.print_stats()
 
+		for k, v in pairs(statistics) do
+			assert( M.stats[k] == v, gen_msg("M.stats["..k.."]", M.stats[k], v) )
+		end
+	
 --        print "packets2 = ["
 		--verify the received packet buffers and writebacks
 		for i=1, #receive.buffers do
@@ -1192,6 +1196,8 @@ function new (pciaddress)
 
 		M.clear_rx()
 		pcie_master_reset()
+
+		print "[PASS]" -- :-)
 	end
 
 	--create a copy of the given table
@@ -1221,6 +1227,9 @@ function new (pciaddress)
 		local rx_writebacks = { { mrq=0x00, id=0x00, checksum=0x09df, status=0x060023, length=0x05d8, vlan=vlan_id },
 						        { mrq=0x00, id=0x00, checksum=0x09df, status=0x060023, length=0x05d8, vlan=vlan_id },	
 						        { mrq=0x00, id=0x00, checksum=0x09df, status=0x060023, length=0x04e4, vlan=vlan_id } }
+		
+		local statistics = { PRC1522=3, GPRC=3, MPRC=3, GPTC=3, GORCL=4256, GOTCL=4256, MPTC=3, TORL=4256, TOTL=4256, 
+							 TPR=3, TPT=3, PTC1522=3, MPTC=3, TSCTC=1 }
 		--CONFIGURATION END--
 
 		local transmit, receive = {}, {}
@@ -1265,10 +1274,11 @@ function new (pciaddress)
 			rx_remain = rx_remain - transmit.mss
 		end
 
-		print("DBG: #receive.buffers[1] = "..tostring(#receive.buffers[1]))
-		print("DBG: #receive.buffers[2] = "..tostring(#receive.buffers[2]))
-		print("DBG: #receive.buffers[3] = "..tostring(#receive.buffers[3]))
-		M.verify_tso(transmit, receive)
+		print "selftest_verify_tso: "
+--		print("DBG: #receive.buffers[1] = "..tostring(#receive.buffers[1]))
+--		print("DBG: #receive.buffers[2] = "..tostring(#receive.buffers[2]))
+--		print("DBG: #receive.buffers[3] = "..tostring(#receive.buffers[3]))
+		M.verify_tso(transmit, receive, statistics)
 
 	end --M.selftest_verify_tso()
 
