@@ -351,6 +351,7 @@ function new (pciaddress)
 
    local function clear_rx()
       rdt = 0
+	  rxnext = 0
       regs[RDT] = 0
       regs[RDH] = 0
       C.usleep(1000) -- wait for 1 ms
@@ -1281,6 +1282,63 @@ function new (pciaddress)
 		M.verify_tso(transmit, receive, statistics)
 
 	end --M.selftest_verify_tso()
+
+
+	--returns element at 'index' of 'type' located at 'base'+'offset' address (without any protection ;-))
+	local function unprotected(index, type, base, offset)
+		return ffi.cast( ffi.typeof("$ *", ffi.typeof(type)),
+						 ffi.cast("uint8_t *", base) + offset)[index]
+	end
+
+	--Receive a "big" packet using software emulated LRO
+	--Parameters: address - memory address to copy the received packet
+	--            size    - size of the buffer
+	--Returns: Tuple (length, num_of_packets) [Note: length bytes of given buffer that got used]
+	--            OR (nil, "Error message")
+	function M.receive_lro(address, size)
+		if M.rx_empty() then 
+			return nil, "Empty rx ring"
+		else
+			local count, offset, length = 0, 0, 0
+			local remaining = size
+			local big_pkt, cur_pkt = {}, {}
+			local frame_len = 14 -- Ethernet frame length
+
+			while M.ring_pending(regs[RDH], regs[RDT]) > 0 do
+				--validate the next received packet belongs to current "big" packet
+
+				local mem = protected("uint8_t", rxbuffers[rxnext], frame_len, rxdesc[rxnext].wb.length)
+				
+				---XXX add IPv4 support
+				--XXX read the IPv4 header values that should be matched
+				assert(bit.band(mem[0], 0x60) == 0x60, "NYI: IPv4 support in receive_lro()")
+
+				cur_pkt.ver_traf_flow  = unprotected(0, "uint32_t", rxbuffers[rxnext], frame_len)
+				cur_pkt.payload_length = 40 + unprotected(0, "uint16_t", rxbuffers[rxnext], frame_len + 4)
+				cur_pkt.next_header    = mem[6]
+				mem = protected("uint64_t", rxbuffers[rxnext], frame_len + 8, 2)
+				cur_pkt.source_addr = mem[0]
+				cur_pkt.dest_addr   = mem[1]
+
+				if count = 0 then --first rx packet
+					length = rxdesc[rxnext].wb.length
+					big_pkt = table.copy(cur_pkt)		
+				else
+					offset = 40
+					length = rxdesc[rxnext].wb.length - offset
+				end
+
+				assert(remaining >= rxdesc[rxnext].wb.length, "Insufficient buffer size")
+				ffi.copy(address, rxbuffers[rxnext] + offset, length)
+				rxnext = (rxnext + 1) % num_descriptors
+				count = count + 1
+				remaining = size - remaining - rxdesc[rxnext].wb.length
+			end
+
+				--XXX fix big_pkt payload length
+			return size-remaining, count
+		end
+	end
 
    return M
 end
