@@ -1284,10 +1284,10 @@ function new (pciaddress)
 	end --M.selftest_verify_tso()
 
 
-	--returns element at 'index' of 'type' located at 'base'+'offset' address (without any protection ;-))
-	local function unprotected(index, type, base, offset)
+	--returns pointer to element of 'type' located at 'base'+'offset' address (without any protection ;-))
+	local function unprotected(type, base, offset)
 		return ffi.cast( ffi.typeof("$ *", ffi.typeof(type)),
-						 ffi.cast("uint8_t *", base) + offset)[index]
+						 ffi.cast("uint8_t *", base) + offset)
 	end
 
 	--Receive a "big" packet using software emulated LRO
@@ -1303,27 +1303,36 @@ function new (pciaddress)
 			local remaining = size
 			local big_pkt, cur_pkt = {}, {}
 			local frame_len = 14 -- Ethernet frame length
+			local start_addr = nil
+			local payload_length = 0 --of "big" packet
+			local match_headers = { "ver_traf_flow", "next_header", "source_addr", "dest_addr", "source_port", "dest_port" }
 
 			while M.ring_pending(regs[RDH], regs[RDT]) > 0 do
 				--validate the next received packet belongs to current "big" packet
 
 				local mem = protected("uint8_t", rxbuffers[rxnext], frame_len, rxdesc[rxnext].wb.length)
 				
-				---XXX add IPv4 support
+				--XXX add IPv4 support
 				--XXX read the IPv4 header values that should be matched
 				assert(bit.band(mem[0], 0x60) == 0x60, "NYI: IPv4 support in receive_lro()")
 
-				cur_pkt.ver_traf_flow  = unprotected(0, "uint32_t", rxbuffers[rxnext], frame_len)
-				cur_pkt.payload_length = 40 + unprotected(0, "uint16_t", rxbuffers[rxnext], frame_len + 4)
+				cur_pkt.ver_traf_flow  = unprotected("uint32_t", rxbuffers[rxnext], frame_len)[0]
+				payload_length = payload_length + 40 + (unprotected("uint16_t", rxbuffers[rxnext], frame_len + 4)[0])
 				cur_pkt.next_header    = mem[6]
 				mem = protected("uint64_t", rxbuffers[rxnext], frame_len + 8, 2)
 				cur_pkt.source_addr = mem[0]
 				cur_pkt.dest_addr   = mem[1]
 
 				if count = 0 then --first rx packet
+					start_addr = rxbuffers[rxnext]
 					length = rxdesc[rxnext].wb.length
 					big_pkt = table.copy(cur_pkt)		
-				else
+				else --match current packet against "big" packet's headers
+					for k, v in pairs(big_pkt) do --XXX or use match_headers?
+						if cur_pkt[k] ~= v then
+							return size-remaining, count
+						end
+					end
 					offset = 40
 					length = rxdesc[rxnext].wb.length - offset
 				end
@@ -1335,7 +1344,8 @@ function new (pciaddress)
 				remaining = size - remaining - rxdesc[rxnext].wb.length
 			end
 
-				--XXX fix big_pkt payload length
+			unprotected("uint16_t", start_addr, frame_len + 4)[0] = payload_length --set payload length of "big" packet
+
 			return size-remaining, count
 		end
 	end
