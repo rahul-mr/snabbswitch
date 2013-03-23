@@ -17,6 +17,7 @@ local pci = require("pci")
 local lib = require("lib")
 local bits, bitset = lib.bits, lib.bitset
 
+require("stt_h")
 require("clib_h")
 require("snabb_h")
 
@@ -1286,67 +1287,75 @@ function new (pciaddress)
 
 	--returns pointer to element of 'type' located at 'base'+'offset' address (without any protection ;-))
 	local function unprotected(type, base, offset)
+		offset = offset or 0
 		return ffi.cast( ffi.typeof("$ *", ffi.typeof(type)),
 						 ffi.cast("uint8_t *", base) + offset)
 	end
 
 	--Receive a "big" packet using software emulated LRO
-	--Parameters: address - memory address to copy the received packet
-	--            size    - size of the buffer
+	--Parameters: buf_address - memory address to copy the received packet
+	--            buf_size    - size of the buffer
 	--Returns: Tuple (length, num_of_packets) [Note: length bytes of given buffer that got used]
 	--            OR (nil, "Error message")
-	function M.receive_lro(address, size)
+	function M.receive_lro(buf_address, buf_size)
 		if M.rx_empty() then 
 			return nil, "Empty rx ring"
 		else
-			local count, offset, length = 0, 0, 0
-			local remaining = size
-			local big_pkt, cur_pkt = {}, {}
-			local frame_len = 14 -- Ethernet frame length
+			local pkt_count = 0 --num of rx packets that make up the "big" packet
+			local buf_remaining = buf_size
+			local big_pkt = nil
 			local start_addr = nil
-			local payload_length = 0 --of "big" packet
-			local match_headers = { "ver_traf_flow", "next_header", "source_addr", "dest_addr", "source_port", "dest_port" }
+			local cur_pkt_paylen = nil
+			local big_pkt_paylen = 0 -- payload length of "big" packet
+			local match_headers = { "ver_traf_flow", "next_hdr", "src_addr", "dst_addr", "src_port", "dst_port" }
+			local loop = true
 
-			while M.ring_pending(regs[RDH], regs[RDT]) > 0 do
-				--validate the next received packet belongs to current "big" packet
+			while loop and M.ring_pending(regs[RDH], regs[RDT]) > 0 do
+			
+				--XXX handle packets with rxdesc[rxnext].wb.status showing invalid IP/TCP checksums
 
-				local mem = protected("uint8_t", rxbuffers[rxnext], frame_len, rxdesc[rxnext].wb.length)
+				local pkt = unprotected("frame_hdr", rxbuffers[rxnext])
+				assert(pkt.eth.type == 0x86DD and 
+		   			   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+					   pkt.ipv6.next_hdr == 0x06,
+					   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
 				
-				--XXX add IPv4 support
-				--XXX read the IPv4 header values that should be matched
-				assert(bit.band(mem[0], 0x60) == 0x60, "NYI: IPv4 support in receive_lro()")
+				cur_pkt_paylen = pkt.ipv6.pay_len
+				pkt.ipv6.pay_len = 0 --to match big_pkt
 
-				cur_pkt.ver_traf_flow  = unprotected("uint32_t", rxbuffers[rxnext], frame_len)[0]
-				payload_length = payload_length + 40 + (unprotected("uint16_t", rxbuffers[rxnext], frame_len + 4)[0])
-				cur_pkt.next_header    = mem[6]
-				mem = protected("uint64_t", rxbuffers[rxnext], frame_len + 8, 2)
-				cur_pkt.source_addr = mem[0]
-				cur_pkt.dest_addr   = mem[1]
-
-				if count = 0 then --first rx packet
+				local cp_offset, cp_length = 0, 0 --copy parameters
+				
+				if pkt_count = 0 then --first rx packet
 					start_addr = rxbuffers[rxnext]
-					length = rxdesc[rxnext].wb.length
+					cp_length = rxdesc[rxnext].wb.length
 					big_pkt = table.copy(cur_pkt)		
 				else --match current packet against "big" packet's headers
-					for k, v in pairs(big_pkt) do --XXX or use match_headers?
-						if cur_pkt[k] ~= v then
-							return size-remaining, count
-						end
+					local match = false
+					if pkt.eth == big_pkt.eth and--XXX hoping that matching structs will work
+					   pkt.ipv6 == big_pkt.ipv6 and
+					   pkt.seg.src_port == big_pkt.seg.src_port and
+					   pkt.seg.dst_port == big_pkt.seg.dst_port then
+						--XXX validate STT parameters. If invalid return error
+					else
+
 					end
-					offset = 40
-					length = rxdesc[rxnext].wb.length - offset
+
+					cp_offset = ip_hdr_len
+					cp_length = rxdesc[rxnext].wb.length - cp_offset
 				end
 
-				assert(remaining >= rxdesc[rxnext].wb.length, "Insufficient buffer size")
-				ffi.copy(address, rxbuffers[rxnext] + offset, length)
+				regs[RDH] =  regs[RDH] + 1
+				assert(buf_remaining >= cp_length, "Insufficient buffer size")
+				ffi.copy(buf_address, rxbuffers[rxnext] + cp_offset, cp_length)
 				rxnext = (rxnext + 1) % num_descriptors
-				count = count + 1
-				remaining = size - remaining - rxdesc[rxnext].wb.length
+				pkt_count = pkt_count + 1
+				buf_remaining = buf_remaining - cp_length
 			end
 
-			unprotected("uint16_t", start_addr, frame_len + 4)[0] = payload_length --set payload length of "big" packet
-
-			return size-remaining, count
+			unprotected("uint16_t", start_addr, frame_len + 4)[0] = big_pkt_paylen --set payload length of "big" packet
+			--XXX re-calculate TCP checksum
+			--
+			return buf_size-buf_remaining, pkt_count
 		end
 	end
 

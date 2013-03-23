@@ -10,75 +10,10 @@ local lib = require("lib")
 local bits, bitset = lib.bits, lib.bitset
 local crc = require("crc")
 
+require("stt_h")
+
 ffi.cdef[[
-
-    /* STT frame header */
-    struct stt_frame_hdr
-    {
-        uint8_t  ver;    
-        uint8_t  flags;    
-        uint8_t  l4_ofs;    
-        uint8_t  reserved;    
-        uint16_t mss;    
-        uint16_t vlan;    
-        uint64_t ctx_id;    
-        uint16_t padding;    
-        //       data;       /* encapsulated Ethernet Frame */
-    } __attribute__((packed));  
-
-    /* STT segment header */
-    struct stt_seg_hdr
-    {
-        uint16_t src_port;
-        uint16_t dst_port;
-        uint16_t frag_ofs;    /* used by STT (TCP seq_num_L)*/
-        uint16_t frame_len;   /* used by STT (TCP seq_num_H)*/
-        uint32_t ack_num;     /* used by STT (const for each segment of an STT frame)*/
-        uint8_t  data_ofs;    /* lower nibble */
-        uint8_t  flags;       /* upper 6 bits (only? -XXX) */
-        uint16_t window;
-        uint16_t checksum;
-        uint16_t urg_ptr;
-        //       options;     /* variable size */
-        //       data;        /* variable size */
-    } __attribute__((packed));
-
-
-    /* IPv6 header */
-    struct ipv6_hdr
-    {
-        uint32_t ver_traf_flow;        
-        uint16_t pay_len;        
-        uint8_t  next_hdr;        
-        uint8_t  hop_limit;        
-        uint8_t  src_addr [16];        
-        uint8_t  dst_addr [16];        
-    } __attribute__((packed));
-
-    /* 802.3 Ethernet frame header (without 802.1Q tag and FCS).
-    Note: use NIC's vlan tagging, FCS facility :-) */
-    struct eth_hdr
-    {
-        uint8_t  dst_mac [6];
-        uint8_t  src_mac [6];
-        uint16_t type;
-    } __attribute__((packed));
-
-    /* [Ethernet + IPv6 + STT ("TCP-like")] frame headers */
-    struct frame_hdr
-    {
-        struct eth_hdr      eth;
-        struct ipv6_hdr     ipv6;
-        struct stt_seg_hdr  seg;
-
-    } __attribute__((packed));
-
-    /* frame0 - for 1st descriptor -- XXX better naming?*/
-    struct frame0
-    {
-        struct frame_hdr     hdr;
-        struct stt_frame_hdr stt_hdr;
-    } __attribute__((packed));
+//moved to stt.h
 ]]
 
 ---------
