@@ -124,6 +124,7 @@ function new()
 		stt.mem.hdr.seg.dst_port = STT_DST_PORT
 		stt.mem.hdr.seg.frame_len = 18 + pkt.size --stt frame header + encapsulated packet
 		stt.mem.hdr.seg.ack_num = ACK_NUM
+		stt.mem.hdr.seg.flags = bits({ack=4})
 
 		stt.mem.hdr.ipv6.paylen = 20 + 18 + pkt.size --"TCP-like" header + stt frame header + encapsulated packet
 

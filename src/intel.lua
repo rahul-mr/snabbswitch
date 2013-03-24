@@ -1292,6 +1292,44 @@ function new (pciaddress)
 						 ffi.cast("uint8_t *", base) + offset)
 	end
 
+	--match two Eth + IPv6 + TCP packet headers
+	--Parameters: a, b of type: unprotected("struct frame_hdr", ...)
+	--Returns: true if relevant headers match
+	--         false otherwise
+	function M.match_headers(a, b)
+		local i = 0
+		--check ethernet headers --XXX use memcmp?
+		while i<=5 do
+			if (a.eth.dst_mac[i] ~= b.eth.dst_mac[i]) or (a.eth.src_mac[i] ~= b.eth.src_mac[i]) then
+				return false
+			end
+			i = i + 1
+		end
+		if a.eth.type ~= b.eth.type then return false end 
+
+		--check ipv6 headers
+		if a.ipv6.ver_traf_flow ~= b.ipv6.ver_traf_flow or
+		   a.ipv6.next_hdr      ~= b.ipv6.next_hdr      or --skip ipv6.pay_len
+		   a.ipv6.hop_limit     ~= b.ipv6.hop_limit     then
+		   return false
+		end
+
+		i = 0
+		while i<=15 do
+			if (a.ipv6.src_addr[i] ~= b.ipv6.src_addr[i]) or (a.ipv6.dst_addr[i] ~= b.ipv6.dst_addr[i]) then
+				return false
+			end
+		end
+
+		--check TCP headers
+		if a.seg.src_port ~= b.seg.src_port or
+		   a.seg.dst_port ~= b.seg.dst_port then
+		   return false
+		end
+
+		return true --all "relevant" headers matched :-)
+	end
+
 	--Receive a "big" packet using software emulated LRO
 	--Parameters: buf_address - memory address to copy the received packet
 	--            buf_size    - size of the buffer
@@ -1302,61 +1340,58 @@ function new (pciaddress)
 			return nil, "Empty rx ring"
 		else
 			local pkt_count = 0 --num of rx packets that make up the "big" packet
-			local buf_remaining = buf_size
+			local buf_used = 0
 			local big_pkt = nil
 			local start_addr = nil
 			local cur_pkt_paylen = nil
 			local big_pkt_paylen = 0 -- payload length of "big" packet
-			local match_headers = { "ver_traf_flow", "next_hdr", "src_addr", "dst_addr", "src_port", "dst_port" }
-			local loop = true
 
-			while loop and M.ring_pending(regs[RDH], regs[RDT]) > 0 do
+			while rxnext < M.regs[RDH] do --read the newly written rx packets
 			
 				--XXX handle packets with rxdesc[rxnext].wb.status showing invalid IP/TCP checksums
 
-				local pkt = unprotected("frame_hdr", rxbuffers[rxnext])
+				local pkt = unprotected("struct frame_hdr", rxbuffers[rxnext])
 				assert(pkt.eth.type == 0x86DD and 
 		   			   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
 					   pkt.ipv6.next_hdr == 0x06,
 					   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
 				
 				cur_pkt_paylen = pkt.ipv6.pay_len
-				pkt.ipv6.pay_len = 0 --to match big_pkt
+				big_pkt_paylen = big_pkt_paylen + cur_pkt_paylen
+				pkt.ipv6.pay_len = 0 --to assist in copying ip header to big_pkt
 
 				local cp_offset, cp_length = 0, 0 --copy parameters
 				
 				if pkt_count = 0 then --first rx packet
 					start_addr = rxbuffers[rxnext]
 					cp_length = rxdesc[rxnext].wb.length
-					big_pkt = table.copy(cur_pkt)		
+					big_pkt = unprotected("struct frame_hdr", buf_address)
 				else --match current packet against "big" packet's headers
 					local match = false
-					if pkt.eth == big_pkt.eth and--XXX hoping that matching structs will work
-					   pkt.ipv6 == big_pkt.ipv6 and
-					   pkt.seg.src_port == big_pkt.seg.src_port and
-					   pkt.seg.dst_port == big_pkt.seg.dst_port then
+					if match_packets(pkt, big_pkt) then --belongs to big packet
 						--XXX validate STT parameters. If invalid return error
-					else
 
+					else
+						break --out of while loop
 					end
 
-					cp_offset = ip_hdr_len
+					cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
 					cp_length = rxdesc[rxnext].wb.length - cp_offset
 				end
 
-				regs[RDH] =  regs[RDH] + 1
-				assert(buf_remaining >= cp_length, "Insufficient buffer size")
-				ffi.copy(buf_address, rxbuffers[rxnext] + cp_offset, cp_length)
+				assert( (buf_size - buf_used) >= cp_length, "Insufficient buffer size")
+				ffi.copy(buf_address + buf_used, rxbuffers[rxnext] + cp_offset, cp_length)
+				buf_used = buf_used + cp_length
+
 				rxnext = (rxnext + 1) % num_descriptors
 				pkt_count = pkt_count + 1
-				buf_remaining = buf_remaining - cp_length
-			end
+			end --while loop
 
 			unprotected("uint16_t", start_addr, frame_len + 4)[0] = big_pkt_paylen --set payload length of "big" packet
-			--XXX re-calculate TCP checksum
+			--XXX re-calculate TCP checksum of "big" packet
 			--
-			return buf_size-buf_remaining, pkt_count
-		end
+			return buf_used, pkt_count
+		end --if (M.rx_empty) else
 	end
 
    return M
