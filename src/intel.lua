@@ -1348,43 +1348,45 @@ function new (pciaddress)
 
 			while rxnext < M.regs[RDH] do --read the newly written rx packets
 			
-				--XXX handle packets with rxdesc[rxnext].wb.status showing invalid IP/TCP checksums
+				--handle packets with rxdesc[rxnext].wb.status showing invalid IP/TCP checksums
+				if rxdesc[rxnext].wb.status ~= 0x060023 then --in-correct status for Eth+IPv6+TCP
+					rxnext = (rxnext + 1) % num_descriptors --skip this packet
+				else
+					local pkt = unprotected("struct frame_hdr", rxbuffers[rxnext])
+					assert(pkt.eth.type == 0x86DD and 
+						   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+						   pkt.ipv6.next_hdr == 0x06,
+						   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
+					
+					cur_pkt_paylen = pkt.ipv6.pay_len
+					pkt.ipv6.pay_len = 0 --to assist in copying ip header to big_pkt
 
-				local pkt = unprotected("struct frame_hdr", rxbuffers[rxnext])
-				assert(pkt.eth.type == 0x86DD and 
-		   			   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
-					   pkt.ipv6.next_hdr == 0x06,
-					   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
-				
-				cur_pkt_paylen = pkt.ipv6.pay_len
-				big_pkt_paylen = big_pkt_paylen + cur_pkt_paylen
-				pkt.ipv6.pay_len = 0 --to assist in copying ip header to big_pkt
+					local cp_offset, cp_length = 0, 0 --copy parameters
+					
+					if pkt_count = 0 then --first rx packet
+						start_addr = rxbuffers[rxnext]
+						cp_length = rxdesc[rxnext].wb.length
+						big_pkt = unprotected("struct frame_hdr", buf_address)
+					else --match current packet against "big" packet's headers
+						local match = false
 
-				local cp_offset, cp_length = 0, 0 --copy parameters
-				
-				if pkt_count = 0 then --first rx packet
-					start_addr = rxbuffers[rxnext]
-					cp_length = rxdesc[rxnext].wb.length
-					big_pkt = unprotected("struct frame_hdr", buf_address)
-				else --match current packet against "big" packet's headers
-					local match = false
-					if match_packets(pkt, big_pkt) then --belongs to big packet
-						--XXX validate STT parameters. If invalid return error
+						if not match_packets(pkt, big_pkt) then
+							break --out of while loop
+						end
 
-					else
-						break --out of while loop
+						cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
+						assert(cur_pkt_paylen == (rxdesc[rxnext].wb.length - cp_offset), "payload lengths are not matching")
+						cp_length = rxdesc[rxnext].wb.length - cp_offset
 					end
 
-					cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
-					cp_length = rxdesc[rxnext].wb.length - cp_offset
-				end
+					assert( (buf_size - buf_used) >= cp_length, "Insufficient buffer size")
+					ffi.copy(buf_address + buf_used, rxbuffers[rxnext] + cp_offset, cp_length)
+					buf_used = buf_used + cp_length
 
-				assert( (buf_size - buf_used) >= cp_length, "Insufficient buffer size")
-				ffi.copy(buf_address + buf_used, rxbuffers[rxnext] + cp_offset, cp_length)
-				buf_used = buf_used + cp_length
-
-				rxnext = (rxnext + 1) % num_descriptors
-				pkt_count = pkt_count + 1
+					big_pkt_paylen = big_pkt_paylen + cur_pkt_paylen
+					rxnext = (rxnext + 1) % num_descriptors
+					pkt_count = pkt_count + 1
+				end --if else rxdesc[rxnext].wb.status
 			end --while loop
 
 			unprotected("uint16_t", start_addr, frame_len + 4)[0] = big_pkt_paylen --set payload length of "big" packet
