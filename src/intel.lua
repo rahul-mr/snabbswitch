@@ -1370,7 +1370,7 @@ function new (pciaddress)
 						cp_length = rxdesc[rxnext].wb.length
 						big_pkt = unprotected("struct frame_hdr", buf_address)
 
-					elseif not match_packets(pkt, big_pkt, 1 + big_pkt_paylen) then
+					elseif not match_packets(pkt, big_pkt, big_pkt_paylen) then
 						break --out of while loop
 					else
 						cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
