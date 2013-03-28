@@ -1294,9 +1294,10 @@ function new (pciaddress)
 
 	--match two Eth + IPv6 + TCP packet headers
 	--Parameters: a, b of type: unprotected("struct frame_hdr", ...)
+	--            exp_frame_len: expected value in a's frame_len TCP(STT) header
 	--Returns: true if relevant headers match
 	--         false otherwise
-	function M.match_headers(a, b)
+	function M.match_headers(a, b, exp_frame_len)
 		local i = 0
 		--check ethernet headers --XXX use memcmp?
 		while i<=5 do
@@ -1322,14 +1323,19 @@ function new (pciaddress)
 		end
 
 		--check TCP headers
-		if a.seg.src_port ~= b.seg.src_port or
-		   a.seg.dst_port ~= b.seg.dst_port then
+		if a.seg.src_port  ~= b.seg.src_port or
+		   a.seg.dst_port  ~= b.seg.dst_port or
+		   a.seg.frag_ofs  ~= b.seg.frag_ofs or
+		   a.seg.frame_len ~= exp_frame_len  or
+		   a.seg.ack_num   ~= b.seg.ack_num  then
 		   return false
 		end
 
 		return true --all "relevant" headers matched :-)
 	end
 
+	
+	--XXX convert assert()s to return nil, "error message" ?
 	--Receive a "big" packet using software emulated LRO
 	--Parameters: buf_address - memory address to copy the received packet
 	--            buf_size    - size of the buffer
@@ -1363,13 +1369,10 @@ function new (pciaddress)
 						start_addr = rxbuffers[rxnext]
 						cp_length = rxdesc[rxnext].wb.length
 						big_pkt = unprotected("struct frame_hdr", buf_address)
-					else --match current packet against "big" packet's headers
-						local match = false
 
-						if not match_packets(pkt, big_pkt) then
-							break --out of while loop
-						end
-
+					elseif not match_packets(pkt, big_pkt, 1 + big_pkt_paylen) then
+						break --out of while loop
+					else
 						cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
 						assert(pkt.ipv6.pay_len == (rxdesc[rxnext].wb.length - cp_offset),"payload lengths are not matching")
 						cp_length = rxdesc[rxnext].wb.length - cp_offset
@@ -1388,26 +1391,25 @@ function new (pciaddress)
 			pkt = unprotected("struct frame_hdr", start_addr) --access big packet
 			pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
 			pkt.seg.checksum = 0
-			local bpkt = protected("uint16_t", start_addr, frame_len, 30) --16-bit word access for checksum calculation
 
-			local checksum = 0
+			local wpkt  = unprotected("uint16_t", start_addr, frame_len) --16-bit word access for checksum calculation
 			local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
+			local checksum = 0
 			
 			for i=0, 15 do --src and dest addrs
 				checksum = checksum + addrs[i]
 			end
 
 			checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
-			
+		
 			unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
 
-			for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header
-				checksum = checksum + bpkt[i]
+			for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header + text
+				checksum = checksum + wpkt[i]
 			end
 			
 			checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
 			checksum = checksum + bit.rshift(checksum, 16)
-
 			pkt.seg.checksum = checksum
 
 			return buf_used, pkt_count
