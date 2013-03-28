@@ -1343,7 +1343,6 @@ function new (pciaddress)
 			local buf_used = 0
 			local big_pkt = nil
 			local start_addr = nil
-			local cur_pkt_paylen = nil
 			local big_pkt_paylen = 0 -- payload length of "big" packet
 
 			while rxnext < M.regs[RDH] do --read the newly written rx packets
@@ -1358,9 +1357,6 @@ function new (pciaddress)
 						   pkt.ipv6.next_hdr == 0x06,
 						   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
 					
-					cur_pkt_paylen = pkt.ipv6.pay_len
-					pkt.ipv6.pay_len = 0 --to assist in copying ip header to big_pkt
-
 					local cp_offset, cp_length = 0, 0 --copy parameters
 					
 					if pkt_count = 0 then --first rx packet
@@ -1375,23 +1371,45 @@ function new (pciaddress)
 						end
 
 						cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
-						assert(cur_pkt_paylen == (rxdesc[rxnext].wb.length - cp_offset), "payload lengths are not matching")
+						assert(pkt.ipv6.pay_len == (rxdesc[rxnext].wb.length - cp_offset),"payload lengths are not matching")
 						cp_length = rxdesc[rxnext].wb.length - cp_offset
 					end
 
-					assert( (buf_size - buf_used) >= cp_length, "Insufficient buffer size")
+					assert( (buf_size - buf_used -1) >= cp_length, "Insufficient buffer size") --1 byte for padding
 					ffi.copy(buf_address + buf_used, rxbuffers[rxnext] + cp_offset, cp_length)
 					buf_used = buf_used + cp_length
 
-					big_pkt_paylen = big_pkt_paylen + cur_pkt_paylen
+					big_pkt_paylen = big_pkt_paylen + pkt.ipv6.pay_len
 					rxnext = (rxnext + 1) % num_descriptors
 					pkt_count = pkt_count + 1
 				end --if else rxdesc[rxnext].wb.status
 			end --while loop
 
-			unprotected("uint16_t", start_addr, frame_len + 4)[0] = big_pkt_paylen --set payload length of "big" packet
-			--XXX re-calculate TCP checksum of "big" packet
-			--
+			pkt = unprotected("struct frame_hdr", start_addr) --access big packet
+			pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
+			pkt.seg.checksum = 0
+			local bpkt = protected("uint16_t", start_addr, frame_len, 30) --16-bit word access for checksum calculation
+
+			local checksum = 0
+			local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
+			
+			for i=0, 15 do --src and dest addrs
+				checksum = checksum + addrs[i]
+			end
+
+			checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
+			
+			unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
+
+			for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header
+				checksum = checksum + bpkt[i]
+			end
+			
+			checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
+			checksum = checksum + bit.rshift(checksum, 16)
+
+			pkt.seg.checksum = checksum
+
 			return buf_used, pkt_count
 		end --if (M.rx_empty) else
 	end
