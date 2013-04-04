@@ -24,20 +24,22 @@ function new()
 	local STT_DST_PORT = 2013 --temporary; this will change as the draft evolves
 	local HASH_ALGOS = { crc.crc14 } --XXX Add other hash functions as necessary
 
-	M.get_random_hash = nil --see init()
-	
 	M.ack = nil --current acknowledgement number (serves as identification)
-	M.tx  = { desc = nil, phy = nil, next = nil, total = nil, type="struct stt_tx_frame" } --[Eth+IP+TCP+STT frame header]
-	M.rx  = { desc = nil, phy = nil, next = nil, total = nil, type="struct stt_rx_frame" } --[STT frame header + 64K packet]
+	M.nic = nil --nic object from driver's new()
+	M.tx  = { desc=nil, phy=nil, next=nil, total=nil, type="struct stt_tx_frame" } --[Eth+IP+TCP+STT frame header]
+	M.rx  = { desc=nil, phy=nil, next=nil, total=nil, type="struct stt_rx_frame" } --[STT frame header + 64K packet]
+	M.opt = { src={ mac=nil, ip=nil }, dst={ mac=nil, ip=nil }, flags=nil, mss=nil, vlan=nil, ctx_id=nil }
+	M.get_random_hash = nil --see init()
 
 	---------------
 	-- FUNCTIONS --
 	---------------
 
-	function M.init()
+	function M.init(options)
 		M.ack = 0
-		M.tx.total = 10 --total num of descriptors
-		M.rx.total = 10
+		M.nic = options.nic or assert(false, "stt.lua:: init: options.nic required")
+		M.tx.total = options.tx.total or 10 --total num of descriptors
+		M.rx.total = options.rx.total or 10
 		M.tx.desc, M.tx.phy = memory.dma_alloc(M.tx.total * ffi.sizeof(M.tx.type))
 		M.rx.desc, M.rx.phy = memory.dma_alloc(M.rx.total * ffi.sizeof(M.rx.type))
 		M.tx.desc = protected(M.tx.type, M.tx.desc, 0, M.tx.total)
@@ -45,18 +47,23 @@ function new()
 		M.tx.next = 0
 		M.rx.next = 0
 
+		M.opt.src.mac = options.src.mac or "\x01\x01\x01\x01\x01\x01"
+		M.opt.dst.mac = options.dst.mac or "\x02\x02\x02\x02\x02\x02"
+		M.opt.src.ip  = options.src.ip  or "\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03"
+		M.opt.dst.ip  = options.dst.ip  or "\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04"
+		M.opt.flags   = options.flags   or bits{cs_partial=1}
+		M.opt.mss     = options.mss     or 1500
+		M.opt.vlan    = options.vlan    or 0
+		M.opt.ctx_id  = options.ctx_id  or 0
+
 		math.randomseed( tonumber(tostring(os.time()):reverse():sub(1,6)) ) --http://lua-users.org/wiki/MathLibraryTutorial
 		M.get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --gen_stt_frame() needs the same hash fn between calls
-																	--to maintain correct packet flow
+	   																  --to maintain correct 'encapsulated' packet flow
 	end
 
 	M.init()
 
-	--XXX 1. pass the nic object as argument so that we can call add_txbuf_tso() and other plumbing here (reduces the 
-	-- complexity of using this function)		
-	--    2. allocate memory for the required buffers ("struct stt_tx_frame*"), txdesc,  rxdesc in M.init()
-	--    3. new function M.set_defaults() to set default values for stt options.
-	--
+	--XXX rename to transmit()
 	--Generate an IPv6+STT frame in the given pre-allocated buffer 
 	-- stt: stt options - dictionary containing following:
 	--      mem, dst_mac, src_mac, src_ip, dst_ip, flags, mss, vlan, ctx_id
@@ -67,7 +74,7 @@ function new()
 	--      mem, phy, size
 	--      mem is of type ffi.cast("uint8_t *", ..., size); -- Read-only
 	--      phy is the physical address of the packet buffer (passed to nic)
-	function M.gen_stt_frame(nic, pkt, stt)
+	function M.gen_stt_frame(pkt, stt)
 		assert(stt and pkt, "stt and pkt cannot be nil")
 
 		local pm = protected("uint8_t", pkt.mem, 0, 78) --14 + 60 + 4
