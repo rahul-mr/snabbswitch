@@ -3,20 +3,16 @@
 
 module(...,package.seeall)
 
+local memory = require("memory")
 local ffi = require("ffi")
 local C = ffi.C
 local bit = require("bit")
 local lib = require("lib")
-local bits, bitset = lib.bits, lib.bitset
+local bits, bitset, protected = lib.bits, lib.bitset, lib.protected
 local crc = require("crc")
 
-require("stt_h")
+require("stt_h") --all header definitions moved to stt.h
 
-ffi.cdef[[
-//moved to stt.h
-]]
-
----------
 function new()
 
 	local M = {}
@@ -28,43 +24,57 @@ function new()
 	local STT_DST_PORT = 2013 --temporary; this will change as the draft evolves
 	local HASH_ALGOS = { crc.crc14 } --XXX Add other hash functions as necessary
 
-	local ACK_NUM = 0 --current acknowledgement number (serves as identification)
-	local get_random_hash = nil --see init()
+	M.get_random_hash = nil --see init()
+	
+	M.ack = nil --current acknowledgement number (serves as identification)
+	M.tx  = { desc = nil, phy = nil, next = nil, total = nil, type="struct stt_tx_frame" } --[Eth+IP+TCP+STT frame header]
+	M.rx  = { desc = nil, phy = nil, next = nil, total = nil, type="struct stt_rx_frame" } --[STT frame header + 64K packet]
 
 	---------------
 	-- FUNCTIONS --
 	---------------
 
 	function M.init()
-		ACK_NUM = 0
+		M.ack = 0
+		M.tx.total = 10 --total num of descriptors
+		M.rx.total = 10
+		M.tx.desc, M.tx.phy = memory.dma_alloc(M.tx.total * ffi.sizeof(M.tx.type))
+		M.rx.desc, M.rx.phy = memory.dma_alloc(M.rx.total * ffi.sizeof(M.rx.type))
+		M.tx.desc = protected(M.tx.type, M.tx.desc, 0, M.tx.total)
+		M.rx.desc = protected(M.rx.type, M.rx.desc, 0, M.rx.total)
+		M.tx.next = 0
+		M.rx.next = 0
+
 		math.randomseed( tonumber(tostring(os.time()):reverse():sub(1,6)) ) --http://lua-users.org/wiki/MathLibraryTutorial
-		get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --gen_stt_frame() needs the same hash fn between calls 
+		M.get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --gen_stt_frame() needs the same hash fn between calls
+																	--to maintain correct packet flow
 	end
 
 	M.init()
 
 	--XXX 1. pass the nic object as argument so that we can call add_txbuf_tso() and other plumbing here (reduces the 
 	-- complexity of using this function)		
-	--    2. allocate memory for the required buffers ("struct frame0*"), txdesc,  rxdesc in M.init()
+	--    2. allocate memory for the required buffers ("struct stt_tx_frame*"), txdesc,  rxdesc in M.init()
 	--    3. new function M.set_defaults() to set default values for stt options.
 	--
 	--Generate an IPv6+STT frame in the given pre-allocated buffer 
 	-- stt: stt options - dictionary containing following:
 	--      mem, dst_mac, src_mac, src_ip, dst_ip, flags, mss, vlan, ctx_id
-	--      mem is of type ffi.cast("struct frame0 *", ...)
+	--      mem is of type ffi.cast("struct stt_tx_frame *", ...)
 	--      {src,dst}_{mac,ip} are strings;
 	--      ctx_id is of type: uint64_t
 	-- pkt: encapsulated packet options - dictionary containing following:
-	--      mem, size
+	--      mem, phy, size
 	--      mem is of type ffi.cast("uint8_t *", ..., size); -- Read-only
-	function M.gen_stt_frame(stt, pkt)
+	--      phy is the physical address of the packet buffer (passed to nic)
+	function M.gen_stt_frame(nic, pkt, stt)
 		assert(stt and pkt, "stt and pkt cannot be nil")
 
 		local pm = protected("uint8_t", pkt.mem, 0, 78) --14 + 60 + 4
 		local ver = bit.band(pm[0], 0x60)
 		local proto = nil
 		local ip_hdr_len = nil
-		local hash = get_random_hash()
+		local hash = M.get_random_hash()
 		local src_addr_off = nil
 		local addr_len  = nil
 
@@ -128,12 +138,12 @@ function new()
 		stt.mem.hdr.seg.src_port = 49152 + hash.generate() --generate a 14-bit hash
 		stt.mem.hdr.seg.dst_port = STT_DST_PORT
 		stt.mem.hdr.seg.frame_len = 18 + pkt.size --stt frame header + encapsulated packet
-		stt.mem.hdr.seg.ack_num = ACK_NUM
+		stt.mem.hdr.seg.ack_num = M.ack
 		stt.mem.hdr.seg.flags = bits({ack=4})
 
 		stt.mem.hdr.ipv6.paylen = 20 + 18 + pkt.size --"TCP-like" header + stt frame header + encapsulated packet
 
-		ACK_NUM  = (ACK_NUM + 1) % (2^16)
+		M.ack  = (M.ack + 1) % (2^16)
 
 	end
 
