@@ -823,6 +823,10 @@ function new (pciaddress)
       end
    end
 
+   function M.wait_tx(size) --wait for transmission of size bytes (tested with add_txbuf_tso)
+	  C.usleep(size * 3125 / 128)
+   end
+
    -- Self-test diagnostics
 
    function M.selftest (options)

@@ -82,7 +82,7 @@ function new()
 	-- options: [optional if configured in init()] 
 	function M.transmit(pkt, options)
 		assert(pkt and pkt.mem and pkt.phy and pkt.size, "pkt is invalid")
-		assert(pkt.size <= 0x10000, "pkt.size must be <= 64K") --max supported pkt.size is 64K
+		assert(pkt.size <= 65444, "pkt.size must be <= 65444") --max supported pkt.size is (2^16) - (14 + 40 + 20 + 18)
 
 		M.opt.eth.src  = options.eth.src  or M.opt.eth.src  or assert(false, "options.eth.src invalid")
 		M.opt.eth.dst  = options.eth.dst  or M.opt.eth.dst  or assert(false, "options.eth.dst invalid")
@@ -174,15 +174,15 @@ function new()
 						 	  { address = pkt.phy,  size = pkt.size }               --Encapsulated packet
 					  		}
 		local size = descriptors[1].size + descriptors[2].size
-		local address = M.tx.desc._ptr + M.tx.next * descriptors[1].size
+		local context = M.tx.desc._ptr + M.tx.next * descriptors[1].size
 
-		nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, address, M.opt.stt.vlan )
+		nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, context, M.opt.stt.vlan )
 
 		nic.flush_tx()
-		C.usleep(size * 3125 / 128) --magic value XXX fix in driver: new function wait_tx(size)
+		nic.wait_tx(size) --wait for transmission
 		nic.clear_tx()
 
-		M.ack  = (M.ack + 1) % 0x10000 --2^16
+		M.ack = (M.ack + 1) % 0x10000 --2^16
 		M.tx.next = (M.tx.next + 1) % M.tx.total
 	end
 
@@ -234,11 +234,12 @@ function new()
 	end
 
 
-	--XXX convert assert()s to return nil, "error message" ?
+	--XXX 1.convert assert()s to return nil, "error message" ?
+	--    2. maintain the "flow"
 	--Receive a "big" packet using STT
 	--Returns: Tuple (length, num_of_packets) [Note: length bytes of given buffer that got used]
 	--            OR (nil, "Error message")
-	function M.receive(nic, buf_address, buf_size)
+	function M.receive(buf_address, buf_size)
 		if nic.rx_empty() then 
 			return nil, "Empty rx ring"
 		else
