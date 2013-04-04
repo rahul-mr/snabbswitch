@@ -93,7 +93,7 @@ function new()
 		M.opt.ip.hop   = options.ip.hop   or M.opt.ip.hop   or 0x40
 		M.opt.stt.flag = options.stt.flag or M.opt.stt.flag or bits{cs_partial=1} --if TSO used, set cs_partial bit
 		M.opt.stt.mss  = options.stt.mss  or M.opt.stt.mss  or 1422 --1500 - (14 + 40 + 20) - 4
-		M.opt.stt.vlan = options.stt.vlan or M.opt.stt.vlan or 0
+		M.opt.stt.vlan = options.stt.vlan or M.opt.stt.vlan or { pcp=0x00, cfi=0x00, id=0x00 }
 		M.opt.stt.ctx  = options.stt.ctx  or M.opt.stt.ctx  or 0
 
 		assert(M.opt.eth.src:len() == 6, "eth.src should have length 6")
@@ -125,7 +125,10 @@ function new()
 		
 		M.tx.desc[M.tx.next].stt_hdr.flags  = M.opt.stt.flag 
 		M.tx.desc[M.tx.next].stt_hdr.mss    = M.opt.stt.mss
-		M.tx.desc[M.tx.next].stt_hdr.vlan   = M.opt.stt.vlan
+		M.tx.desc[M.tx.next].stt_hdr.vlan   = bit.band( bit.bor(bit.lshift(M.opt.stt.vlan.pcp, 13), 
+													  			bit.lshift(M.opt.stt.vlan.cfi, 12),
+																M.opt.stt.vlan.id),
+														0xffff)
 		M.tx.desc[M.tx.next].stt_hdr.ctx_id = M.opt.stt.ctx 
 
 		if ver == 0x40 then      --IPv4
@@ -167,7 +170,20 @@ function new()
 
 		M.tx.desc[M.tx.next].hdr.ipv6.paylen = 20 + 18 + pkt.size --TCP-like header + stt frame header + encapsulated packet
 
+		local descriptors = { { address = M.tx.phy, size = ffi.sizeof(M.tx.type) }, --Eth + IPv6 + TCP + STT frame header
+						 	  { address = pkt.phy,  size = pkt.size }               --Encapsulated packet
+					  		}
+		local size = descriptors[1].size + descriptors[2].size
+		local address = M.tx.desc._ptr + M.tx.next * descriptors[1].size
+
+		nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, address, M.opt.stt.vlan )
+
+		nic.flush_tx()
+		C.usleep(size * 3125 / 128) --magic value XXX fix in driver: new function wait_tx(size)
+		nic.clear_tx()
+
 		M.ack  = (M.ack + 1) % 0x10000 --2^16
+		M.tx.next = (M.tx.next + 1) % M.tx.total
 	end
 
 	--returns pointer to element of 'type' located at 'base'+'offset' address (without any protection ;-))
