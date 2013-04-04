@@ -331,25 +331,37 @@ function new (pciaddress)
       regs[RDT] = 0
       rxnext = 0
       rdt = 0
+	  rxbuffers = {}
       -- Enable RX
       regs[RCTL] = bit.bor(regs[RCTL], bits{EN=1})
    end
 
    -- Enqueue a receive descriptor to receive a packet.
-   local function add_rxbuf (address)
+--   local function add_rxbuf (address)
+--      -- NOTE: RDT points to the next unused descriptor
+--      rxdesc[rdt].data.address = address
+--      rxdesc[rdt].data.dd = 0
+--      rxbuffers[rdt] = address
+--      rdt = (rdt + 1) % num_descriptors
+--      return true
+--   end M.add_rxbuf = add_rxbuf
+
+   local function add_rxbuf (phy, mem)
       -- NOTE: RDT points to the next unused descriptor
-      rxdesc[rdt].data.address = address
+      rxdesc[rdt].data.address = phy
       rxdesc[rdt].data.dd = 0
-      rxbuffers[rdt] = address
+      rxbuffers[rdt] = { phy=phy, mem=mem }
       rdt = (rdt + 1) % num_descriptors
       return true
    end M.add_rxbuf = add_rxbuf
+
 
    local function flush_rx ()
       regs[RDT] = rdt
    end M.flush_rx = flush_rx
 
    local function clear_rx()
+	  rxbuffers = {}
       rdt = 0
 	  rxnext = 0
       regs[RDT] = 0
@@ -385,13 +397,22 @@ function new (pciaddress)
 
    -- Return the next available packet as two values: buffer, length.
    -- If no packet is available then return nil.
+--   function M.receive ()
+--      if regs[RDH] ~= rxnext then
+--         local wb = rxdesc[rxnext].wb
+--         local index = rxnext
+--         local length = wb.length
+--         rxnext = (rxnext + 1) % num_descriptors
+--         return rxbuffers[index], length
+--      end
+--   end
+
    function M.receive ()
       if regs[RDH] ~= rxnext then
          local wb = rxdesc[rxnext].wb
          local index = rxnext
-         local length = wb.length
          rxnext = (rxnext + 1) % num_descriptors
-         return rxbuffers[index], length
+         return rxbuffers[index], wb
       end
    end
 
