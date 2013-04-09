@@ -321,7 +321,7 @@ function new()
 	local function receive_fn(buf_address, buf_size)
 		while true do
 			if nic.rx_empty() then 
-				coroutine.yield()
+				coroutine.yield(nil, "Empty RX buffer")
 			else
 				local addr, wb = nic.receive()--read the newly written rx packet
 		
@@ -334,16 +334,15 @@ function new()
 					local start_addr = nil
 					local big_pkt_paylen = 0 -- payload length of "big" packet
 
-					--handle packets with nic.rxdesc[nic.rxnext].wb.status showing invalid IP/TCP checksums
-					if wb.status ~= 0x060023 then --in-correct status for Eth+IPv6+TCP --XXX confirm vlan operation
-						coroutine.yield() --skip this packet
+					if wb.valid and wb.ipv6 and wb.tcp and wb.eop then --in-correct status for Eth+IPv6+TCP --XXX non-eop
+						coroutine.yield(nil, "skipping invalid packet") --skip this packet
 
 					else
 						local pkt = unprotected("struct frame_hdr", addr.mem)
 						assert(pkt.eth.type == 0x86DD and 
 							   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
 							   pkt.ipv6.next_hdr == 0x06,
-							   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
+							   "Only Eth + IPv6 + TCP(STT) supported -- invalid wb.status check in driver?")
 						
 						local cp_offset, cp_length = 0, 0 --copy parameters
 						

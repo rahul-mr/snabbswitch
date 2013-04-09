@@ -15,7 +15,7 @@ local C = ffi.C
 local bit = require("bit")
 local pci = require("pci")
 local lib = require("lib")
-local bits, bitset = lib.bits, lib.bitset
+local bits, bitset, bitset2, bitrange, bitfield = lib.bits, lib.bitset, lib.bitset2, lib.bitrange, lib.bitfield
 
 require("clib_h")
 require("snabb_h")
@@ -407,17 +407,49 @@ function new (pciaddress)
 --      end
 --   end
 
-   local function receive_fn()
-     while true do
-        if regs[RDH] ~= rxnext then
-          coroutine.yield(rxbuffers[rxnext], rxdesc[rxnext].wb)
-          rxnext = (rxnext + 1) % num_descriptors
-        else --making it explicit
-          coroutine.yield()
-        end
-      end
-   end
-   M.receive = coroutine.wrap(receive_fn)
+	local function format_wb(wb)
+		local out = {}
+		out.length = wb.length
+		out.valid = true
+
+		if bitset2(wb.status, bitrange(31, 20)) then --Error fields
+			out.valid = false
+		else 
+			local pt = bitfield(wb.status, 19, 16) --Packet Type field
+
+			if pt==0x1 or pt==0x2 or pt==0x3 or pt==0x4 or pt==0x7 or pt==0x8 or pt==0x9 or pt==0xA then 
+				out.ipv4 = true 
+			elseif pt==0x5 or pt==0x6 or pt==0xB or pt==0xC then 
+				out.ipv6 = true 
+			else
+				out.valid = false
+				return out
+			end
+
+			if bitset2(wb.status, {tcpcs=5}) and (pt==0x2 or pt==0x6 or pt==0x7 or pt==0x8 or pt==0xB or pt==0xC) then
+				out.tcp = true --checksum-verified tcp
+			elseif bitset2(wb.status, {udpcs=4}) and (pt==0x2 or pt==0x6 or pt==0x8 or pt==0xC) then
+				out.udp = true --checksum-verified udp
+			end
+
+			if bitset2(wb.status, {eop=1, dd=0}) then out.eop = true end
+		end --else bitset2
+		return out
+	end
+
+	local function receive_fn()
+	  while true do
+		  if regs[RDH] ~= rxnext then
+			 coroutine.yield(rxbuffers[rxnext], format_wb(rxdesc[rxnext].wb))
+			 rxnext = (rxnext + 1) % num_descriptors
+		  else --making it explicit
+			 coroutine.yield()
+		  end
+		end
+	end
+	M.receive = coroutine.wrap(receive_fn)
+
+	
 
    function M.ack ()
    end
