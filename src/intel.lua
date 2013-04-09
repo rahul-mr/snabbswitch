@@ -407,13 +407,13 @@ function new (pciaddress)
 --      end
 --   end
 
-   local receive_fn = function ()
+   local function receive_fn()
      while true do
         if regs[RDH] ~= rxnext then
           coroutine.yield(rxbuffers[rxnext], rxdesc[rxnext].wb)
           rxnext = (rxnext + 1) % num_descriptors
-        else --make it explicit
-          coroutine.yield(nil)
+        else --making it explicit
+          coroutine.yield()
         end
       end
    end

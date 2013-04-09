@@ -235,89 +235,95 @@ function new()
 
 
 	--XXX 1.convert assert()s to return nil, "error message" ?
-	--    2. maintain the "flow"
+	--	  2. use the updated nic.receive() instead of handling nic.rxnext, nic.regs[RDH] etc.
+	--    3. maintain the "flow"
 	--Receive a "big" packet using STT
 	--Returns: Tuple (length, num_of_packets) [Note: length bytes of given buffer that got used]
 	--            OR (nil, "Error message")
-	function M.receive(buf_address, buf_size)
-		if nic.rx_empty() then 
-			return nil, "Empty rx ring"
-		else
-			local pkt_count = 0 --num of rx packets that make up the "big" packet
-			local buf_used = 0
-			local big_pkt = nil
-			local start_addr = nil
-			local big_pkt_paylen = 0 -- payload length of "big" packet
-
-			while nic.rxnext < nic.regs[RDH] do --read the newly written rx packets
-			
-				--handle packets with nic.rxdesc[nic.rxnext].wb.status showing invalid IP/TCP checksums
-				if nic.rxdesc[nic.rxnext].wb.status ~= 0x060023 then --in-correct status for Eth+IPv6+TCP
-					nic.rxnext = (nic.rxnext + 1) % nic.num_descriptors --skip this packet
-
+	local function receive_fn(buf_address, buf_size)
+		while true do
+			if nic.rx_empty() then 
+				coroutine.yield()
+			else
+				local addr, wb = nic.receive()--read the newly written rx packet
+		
+				if addr == nil then 
+					coroutine.yield()
 				else
-					local pkt = unprotected("struct frame_hdr", nic.rxbuffers[nic.rxnext])
-					assert(pkt.eth.type == 0x86DD and 
-						   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
-						   pkt.ipv6.next_hdr == 0x06,
-						   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
-					
-					local cp_offset, cp_length = 0, 0 --copy parameters
-					
-					if pkt_count = 0 then --first rx packet
-						start_addr = nic.rxbuffers[nic.rxnext]
-						cp_length = nic.rxdesc[nic.rxnext].wb.length
-						big_pkt = unprotected("struct frame_hdr", buf_address)
+					local pkt_count = 0 --num of rx packets that make up the "big" packet
+					local buf_used = 0
+					local big_pkt = nil
+					local start_addr = nil
+					local big_pkt_paylen = 0 -- payload length of "big" packet
 
-					elseif not match_packets(pkt, big_pkt, big_pkt_paylen) then
-						break --out of while loop
+					--handle packets with nic.rxdesc[nic.rxnext].wb.status showing invalid IP/TCP checksums
+					if wb.status ~= 0x060023 then --in-correct status for Eth+IPv6+TCP --XXX confirm vlan operation
+						coroutine.yield() --skip this packet
 
 					else
-						cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
-						assert(pkt.ipv6.pay_len == (nic.rxdesc[nic.rxnext].wb.length - cp_offset),
-			 				   "payload lengths are not matching")
-						cp_length = nic.rxdesc[nic.rxnext].wb.length - cp_offset
-					end
+						local pkt = unprotected("struct frame_hdr", addr.mem)
+						assert(pkt.eth.type == 0x86DD and 
+							   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+							   pkt.ipv6.next_hdr == 0x06,
+							   "NYI: Only Eth + IPv6 + TCP(STT) supported ATM")
+						
+						local cp_offset, cp_length = 0, 0 --copy parameters
+						
+						if pkt_count = 0 then --first rx packet
+							start_addr = nic.rxbuffers[nic.rxnext]
+							cp_length = nic.rxdesc[nic.rxnext].wb.length
+							big_pkt = unprotected("struct frame_hdr", buf_address)
 
-					assert( (buf_size - buf_used -1) >= cp_length, "Insufficient buffer size") --1 byte for padding
-					ffi.copy(buf_address + buf_used, nic.rxbuffers[nic.rxnext] + cp_offset, cp_length)
-					buf_used = buf_used + cp_length
+						elseif not match_packets(pkt, big_pkt, big_pkt_paylen) then
+							break --out of while loop
 
-					big_pkt_paylen = big_pkt_paylen + pkt.ipv6.pay_len
-					nic.rxnext = (nic.rxnext + 1) % nic.num_descriptors
-					pkt_count = pkt_count + 1
-				end --if else nic.rxdesc[nic.rxnext].wb.status
-			end --while loop
+						else
+							cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
+							assert(pkt.ipv6.pay_len == (nic.rxdesc[nic.rxnext].wb.length - cp_offset),
+								   "payload lengths are not matching")
+							cp_length = nic.rxdesc[nic.rxnext].wb.length - cp_offset
+						end
 
-			pkt = unprotected("struct frame_hdr", start_addr) --access big packet
-			pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
-			pkt.seg.checksum = 0
+						assert( (buf_size - buf_used -1) >= cp_length, "Insufficient buffer size") --1 byte for padding
+						ffi.copy(buf_address + buf_used, nic.rxbuffers[nic.rxnext] + cp_offset, cp_length)
+						buf_used = buf_used + cp_length
 
-			---- CHECKSUM ---
+						big_pkt_paylen = big_pkt_paylen + pkt.ipv6.pay_len
+						nic.rxnext = (nic.rxnext + 1) % nic.num_descriptors
+						pkt_count = pkt_count + 1
+					end --if else nic.rxdesc[nic.rxnext].wb.status
+				end --while loop
 
-			local wpkt  = unprotected("uint16_t", start_addr, frame_len) --16-bit word access for checksum calculation
-			local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
-			local checksum = 0
+				pkt = unprotected("struct frame_hdr", start_addr) --access big packet
+				pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
+				pkt.seg.checksum = 0
+
+				---- CHECKSUM ---
+
+				local wpkt  = unprotected("uint16_t", start_addr, frame_len) --16-bit word access for checksum calculation
+				local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
+				local checksum = 0
+				
+				for i=0, 15 do --src and dest addrs
+					checksum = checksum + addrs[i]
+				end
+
+				checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
 			
-			for i=0, 15 do --src and dest addrs
-				checksum = checksum + addrs[i]
-			end
+				unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
 
-			checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
-		
-			unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
+				for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header + text
+					checksum = checksum + wpkt[i]
+				end
+				
+				checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
+				checksum = checksum + bit.rshift(checksum, 16)
+				pkt.seg.checksum = checksum
 
-			for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header + text
-				checksum = checksum + wpkt[i]
-			end
-			
-			checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
-			checksum = checksum + bit.rshift(checksum, 16)
-			pkt.seg.checksum = checksum
-
-			return buf_used, pkt_count
-		end --if (nic.rx_empty) else
+				return buf_used, pkt_count
+			end --if (nic.rx_empty) else
 	end
+	M.receive = coroutine.wrap(receive_fn)
 
 	return M
 
