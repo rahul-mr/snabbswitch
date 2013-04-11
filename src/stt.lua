@@ -8,7 +8,7 @@ local ffi = require("ffi")
 local C = ffi.C
 local bit = require("bit")
 local lib = require("lib")
-local bits, bitset, protected = lib.bits, lib.bitset, lib.protected
+local bits, bitset, protected, unprotected, table_copy = lib.bits, lib.bitset, lib.protected, lib.unprotected, lib.table_copy
 local crc = require("crc")
 
 ffi.cdef[[
@@ -25,13 +25,6 @@ struct stt_frame_hdr
 	uint64_t ctx_id;    
 	uint16_t padding;    
 	//       data;       /* encapsulated Ethernet Frame */
-} __attribute__((packed));  
-
-/* STT rx frame */
-struct stt_rx_frame
-{
-   struct stt_frame_hdr hdr;
-   uint8_t[0x10000]     data; /* 64K data */
 } __attribute__((packed));  
 
 
@@ -105,7 +98,6 @@ function new()
 	M.ack = nil --current acknowledgement number (serves as identification)
 	M.nic = nil --nic object from driver's new()
 	M.tx  = { desc=nil, phy=nil, next=nil, total=nil, type="struct stt_tx_frame" } --[Eth+IP+TCP+STT frame header]
-	M.rx  = { desc=nil, phy=nil, next=nil, total=nil, type="struct stt_rx_frame" } --[STT frame header + 64K packet]
 	M.opt = { eth = { src=nil, dst=nil }, 
 			  ip  = { src=nil, dst=nil, vtf=nil, next=nil, hop=nil }, --vtf = ver + traffic + flow; next = next header
 			  stt = { flag=nil, mss=nil, vlan=nil, ctx=nil } 
@@ -124,13 +116,9 @@ function new()
 		M.nic = options.nic or assert(false, "stt.lua:: init: options.nic required")
 
 		M.tx.total = options.tx_total or 10 --total num of descriptors
-		M.rx.total = options.rx_total or 10
 		M.tx.desc, M.tx.phy = memory.dma_alloc(M.tx.total * ffi.sizeof(M.tx.type))
-		M.rx.desc, M.rx.phy = memory.dma_alloc(M.rx.total * ffi.sizeof(M.rx.type))
 		M.tx.desc = protected(M.tx.type, M.tx.desc, 0, M.tx.total)
-		M.rx.desc = protected(M.rx.type, M.rx.desc, 0, M.rx.total)
 		M.tx.next = 0
-		M.rx.next = 0
 
 		M.opt.eth.src  = options.eth.src 
 		M.opt.eth.dst  = options.eth.dst 
@@ -264,144 +252,233 @@ function new()
 		M.tx.next = (M.tx.next + 1) % M.tx.total
 	end
 
-	--returns pointer to element of 'type' located at 'base'+'offset' address (without any protection ;-))
-	local function unprotected(type, base, offset)
-		offset = offset or 0
-		return ffi.cast( ffi.typeof("$ *", ffi.typeof(type)),
-						 ffi.cast("uint8_t *", base) + offset)
-	end
-
-	--match two Eth + IPv6 + TCP packet headers
-	--Parameters: a, b of type: unprotected("struct frame_hdr", ...)
-	--            exp_frame_len: expected value in a's frame_len TCP(STT) header
-	--Returns: true if relevant headers match
-	--         false otherwise
-	function M.match_headers(a, b, exp_frame_len)
-		
-		--check ethernet headers --XXX alternatively use memcmp?
-		for i=0, 5 do
-			if (a.eth.dst_mac[i] ~= b.eth.dst_mac[i]) or (a.eth.src_mac[i] ~= b.eth.src_mac[i]) then
-				return false
-			end
-		end
-		if a.eth.type ~= b.eth.type then return false end 
-
-		--check ipv6 headers
-		if a.ipv6.ver_traf_flow ~= b.ipv6.ver_traf_flow or
-		   a.ipv6.next_hdr      ~= b.ipv6.next_hdr      or --skip ipv6.pay_len
-		   a.ipv6.hop_limit     ~= b.ipv6.hop_limit     then
-		   return false
-		end
-
-		for i=0, 15 do
-			if (a.ipv6.src_addr[i] ~= b.ipv6.src_addr[i]) or (a.ipv6.dst_addr[i] ~= b.ipv6.dst_addr[i]) then
-				return false
-			end
-		end
-
-		--check TCP headers
-		if a.seg.src_port  ~= b.seg.src_port or
-		   a.seg.dst_port  ~= b.seg.dst_port or
-		   a.seg.frag_ofs  ~= b.seg.frag_ofs or
-		   a.seg.frame_len ~= exp_frame_len  or
-		   a.seg.ack_num   ~= b.seg.ack_num  then
-		   return false
-		end
-
-		return true --all "relevant" headers matched :-)
-	end
-
-
-	--XXX 1.convert assert()s to return nil, "error message" ?
-	--	  2. use the updated nic.receive() instead of handling nic.rxnext, nic.regs[RDH] etc.
-	--    3. maintain the "flow"
 	--Receive a "big" packet using STT
-	--Returns: Tuple (length, num_of_packets) [Note: length bytes of given buffer that got used]
-	--            OR (nil, "Error message")
-	local function receive_fn(buf_address, buf_size)
+	--Return an array of completed STT frames. 
+	-- for e,g,: { {  { addrs={ phy=0x1234ABCD, mem=0xDCBA4321 }, size=1234 },  
+	-- 				  { addrs={...}, size=...} 
+	-- 				  --chunks that make up stt_frame_header + encapsulated packet
+	-- 			   },
+	-- 			   {  { addrs={...}, size=... }, 
+	-- 			      { addrs={...}, size=... }
+	-- 			   }
+	-- 			 }
+	local function receive_fn()
 		while true do
-			if nic.rx_empty() then 
-				coroutine.yield(nil, "Empty RX buffer")
-			else
-				local addr, wb = nic.receive()--read the newly written rx packet
-		
-				if addr == nil then 
-					coroutine.yield()
-				else
-					local pkt_count = 0 --num of rx packets that make up the "big" packet
-					local buf_used = 0
-					local big_pkt = nil
-					local start_addr = nil
-					local big_pkt_paylen = 0 -- payload length of "big" packet
+			local frames = {}
+			while nic.rx_unread() do --if there are unread packets
+				local addr, wb = nic.receive()--read an unread rx packet
+				assert(addr and wb, "Expected a packet -- check driver code?")
 
-					if wb.valid and wb.ipv6 and wb.tcp and wb.eop then --in-correct status for Eth+IPv6+TCP --XXX non-eop
-						coroutine.yield(nil, "skipping invalid packet") --skip this packet
+				if wb.valid and wb.ipv6 and wb.tcp and wb.eop then --XXX non-eop (multi desc)
+					local pkt = unprotected("struct frame_hdr", addr.mem)
+					assert(pkt.eth.type == 0x86DD and 
+						   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+						   pkt.ipv6.next_hdr == 0x06,
+						   "Only Eth + IPv6 + TCP(STT) supported -- invalid wb.status check driver code?")
 
-					else
-						local pkt = unprotected("struct frame_hdr", addr.mem)
-						assert(pkt.eth.type == 0x86DD and 
-							   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
-							   pkt.ipv6.next_hdr == 0x06,
-							   "Only Eth + IPv6 + TCP(STT) supported -- invalid wb.status check in driver?")
-						
-						local cp_offset, cp_length = 0, 0 --copy parameters
-						
-						if pkt_count = 0 then --first rx packet
-							start_addr = nic.rxbuffers[nic.rxnext]
-							cp_length = nic.rxdesc[nic.rxnext].wb.length
-							big_pkt = unprotected("struct frame_hdr", buf_address)
+					local dst=true
+					local i=1
+					--check destination MAC
+					while dst do
+						if pkt.eth.dst_mac[i-1] ~= M.opt.eth.src:byte(i) then dst = false end
+						i += 1
+					end
+					--check destination IP
+					i=1
+					while dst do
+						if pkt.ipv6.dst_addr[i-1] ~= M.opt.ip.src:byte(i) then dst = false end
+						i += 1
+					end
+					--check destination TCP port
+					dst = dst and (pkt.seg.dst_port == STT_DST_PORT)
 
-						elseif not match_packets(pkt, big_pkt, big_pkt_paylen) then
-							break --out of while loop
-
-						else
-							cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
-							assert(pkt.ipv6.pay_len == (nic.rxdesc[nic.rxnext].wb.length - cp_offset),
-								   "payload lengths are not matching")
-							cp_length = nic.rxdesc[nic.rxnext].wb.length - cp_offset
+					--XXX gotta trust other fields for the time being
+					
+					if dst then
+						local key = {}
+						for i=1, 4 do
+							key[1 + #key] = bit.tohex( unprotected("uint32_t", pkt.ipv6.src_addr)[i-1] )
 						end
+						key[1 + #key] = "|" --seperator
+						key[1 + #key] = bit.tohex(pkt.seg.src_port)
+						key = table.concat(key) --generate the final string
 
-						assert( (buf_size - buf_used -1) >= cp_length, "Insufficient buffer size") --1 byte for padding
-						ffi.copy(buf_address + buf_used, nic.rxbuffers[nic.rxnext] + cp_offset, cp_length)
-						buf_used = buf_used + cp_length
+						local ack = pkt.seg.ack_num
+						local new_flow = false
 
-						big_pkt_paylen = big_pkt_paylen + pkt.ipv6.pay_len
-						nic.rxnext = (nic.rxnext + 1) % nic.num_descriptors
-						pkt_count = pkt_count + 1
-					end --if else nic.rxdesc[nic.rxnext].wb.status
-				end --while loop
+						if M.flow[key] ~= nil then
+							if M.flow[key].ack ~= ack then --discard old flow and generate a new one
+								M.flow[key] = nil
+								new_flow = true
+							end
+						else
+							new_flow = true	
+						end --else M.flow[key]	
 
-				pkt = unprotected("struct frame_hdr", start_addr) --access big packet
-				pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
-				pkt.seg.checksum = 0
+						local hsize = ffi.sizeof("struct frame_hdr")
+						local psize = wb.length - hsize
+						local pkt_added = false
 
-				---- CHECKSUM ---
+						if new_flow then
+							if pkt.seg.frag_ofs == 0 then --otherwise some packets presumed lost
+								M.flow[key] = { ack=ack,
+												total_len=pkt.seg.frame_len,
+												cur_len=psize,
+												chunks={ { addrs={ phy=addr.phy + hsize, mem=addr.mem + hsize },
+														   size=psize
+														 }
+													   }
+											  }
+								pkt_added = true
+							end
+						else --add chunk
+							if (M.flow[key].cur_len + psize <= M.flow[key].total_len) and
+							   (M.flow[key].total_len == pkt.seg.frame_len) and
+							   (M.flow[key].cur_len == pkt.seg.frag_ofs) then
+								M.flow[key].chunks[1 + #(M.flow[key].chunks)] = { addrs={ phy=addr.phy + hsize, 
+																						  mem=addr.mem + hsize 
+																						},
+																				  size=psize
+																				}
+								M.flow[key].cur_len = M.flow[key].cur_len + psize
+								pkt_added = true
+							end
+						end --else new_flow
+						
+						if pkt_added and (M.flow[key].total_len == M.flow[key].cur_len) then --complete STT frame
+							frames[1 + #frames] = table_copy(M.flow[key].chunks)
+							M.flow[key] = nil
+						end
+					end--if dst
+				end --if wb.valid
+			end --while nic.rx_unread()
 
-				local wpkt  = unprotected("uint16_t", start_addr, frame_len) --16-bit word access for checksum calculation
-				local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
-				local checksum = 0
-				
-				for i=0, 15 do --src and dest addrs
-					checksum = checksum + addrs[i]
-				end
+			coroutine.yield(frames)
 
-				checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
-			
-				unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
-
-				for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header + text
-					checksum = checksum + wpkt[i]
-				end
-				
-				checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
-				checksum = checksum + bit.rshift(checksum, 16)
-				pkt.seg.checksum = checksum
-
-				return buf_used, pkt_count
-			end --if (nic.rx_empty) else
-	end
+		end --while true
+	end --function receive_fn()
 	M.receive = coroutine.wrap(receive_fn)
 
 	return M
 
 end --function new
+----------------------------------------------------------------------------------------------------------------------------
+--					local pkt_count = 0 --num of rx packets that make up the "big" packet
+--					local buf_used = 0
+--					local big_pkt = nil
+--					local start_addr = nil
+--					local big_pkt_paylen = 0 -- payload length of "big" packet
+--
+--					if not (wb.valid and wb.ipv6 and wb.tcp and wb.eop) then --invalid status for Eth+IPv6+TCP --XXX non-eop
+--						coroutine.yield(nil, "skipping invalid packet") --skip this packet
+--
+--					else
+--						local pkt = unprotected("struct frame_hdr", addr.mem)
+--						assert(pkt.eth.type == 0x86DD and 
+--							   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+--							   pkt.ipv6.next_hdr == 0x06,
+--							   "Only Eth + IPv6 + TCP(STT) supported -- invalid wb.status check in driver?")
+--						
+--						local cp_offset, cp_length = 0, 0 --copy parameters
+--						
+--						if pkt_count = 0 then --first rx packet
+--							start_addr = nic.rxbuffers[nic.rxnext]
+--							cp_length = nic.rxdesc[nic.rxnext].wb.length
+--							big_pkt = unprotected("struct frame_hdr", buf_address)
+--
+--						elseif not match_packets(pkt, big_pkt, big_pkt_paylen) then
+--							break --out of while loop
+--
+--						else
+--							cp_offset = ffi.sizeof(ffi.typeof("struct frame_hdr")) --skip the current packet's headers
+--							assert(pkt.ipv6.pay_len == (nic.rxdesc[nic.rxnext].wb.length - cp_offset),
+--								   "payload lengths are not matching")
+--							cp_length = nic.rxdesc[nic.rxnext].wb.length - cp_offset
+--						end
+--
+--						assert( (buf_size - buf_used -1) >= cp_length, "Insufficient buffer size") --1 byte for padding
+--						ffi.copy(buf_address + buf_used, nic.rxbuffers[nic.rxnext] + cp_offset, cp_length)
+--						buf_used = buf_used + cp_length
+--
+--						big_pkt_paylen = big_pkt_paylen + pkt.ipv6.pay_len
+--						nic.rxnext = (nic.rxnext + 1) % nic.num_descriptors
+--						pkt_count = pkt_count + 1
+--					end --if else nic.rxdesc[nic.rxnext].wb.status
+--				end --while loop
+--
+--				pkt = unprotected("struct frame_hdr", start_addr) --access big packet
+--				pkt.ipv6.pay_len = big_pkt_paylen --set its payload length
+--				pkt.seg.checksum = 0
+--
+--				---- CHECKSUM ---
+--
+--				local wpkt  = unprotected("uint16_t", start_addr, frame_len) --16-bit word access for checksum calculation
+--				local addrs = unprotected("uint16_t", start_addr, 8) --16-bit word access to addresses
+--				local checksum = 0
+--				
+--				for i=0, 15 do --src and dest addrs
+--					checksum = checksum + addrs[i]
+--				end
+--
+--				checksum = checksum + pkt.ipv6.next_hdr + pkt.ipv6.pay_len
+--			
+--				unprotected("uint8_t", start_addr, frame_len + 40 + pkt.ipv6.paylen)[0] = 0x00 --padding if seg len is odd
+--
+--				for i=0, math.ceil(pkt.ipv6.pay_len / 2) do --TCP header + text
+--					checksum = checksum + wpkt[i]
+--				end
+--				
+--				checksum = bit.bor(bit.rshift(checksum, 16), bit.band(checksum, 0xffff))
+--				checksum = checksum + bit.rshift(checksum, 16)
+--				pkt.seg.checksum = checksum
+--
+--				return buf_used, pkt_count
+--			end --if (nic.rx_empty) else
+--	end
+--	M.receive = coroutine.wrap(receive_fn)
+--
+--	return M
+--
+--end --function new
+--
+--	--match two Eth + IPv6 + TCP packet headers
+--	--Parameters: a, b of type: unprotected("struct frame_hdr", ...)
+--	--            exp_frame_len: expected value in a's frame_len TCP(STT) header
+--	--Returns: true if relevant headers match
+--	--         false otherwise
+--	function M.match_headers(a, b, exp_frame_len)
+--		
+--		--check ethernet headers --XXX alternatively use memcmp?
+--		for i=0, 5 do
+--			if (a.eth.dst_mac[i] ~= b.eth.dst_mac[i]) or (a.eth.src_mac[i] ~= b.eth.src_mac[i]) then
+--				return false
+--			end
+--		end
+--		if a.eth.type ~= b.eth.type then return false end 
+--
+--		--check ipv6 headers
+--		if a.ipv6.ver_traf_flow ~= b.ipv6.ver_traf_flow or
+--		   a.ipv6.next_hdr      ~= b.ipv6.next_hdr      or --skip ipv6.pay_len
+--		   a.ipv6.hop_limit     ~= b.ipv6.hop_limit     then
+--		   return false
+--		end
+--
+--		for i=0, 15 do
+--			if (a.ipv6.src_addr[i] ~= b.ipv6.src_addr[i]) or (a.ipv6.dst_addr[i] ~= b.ipv6.dst_addr[i]) then
+--				return false
+--			end
+--		end
+--
+--		--check TCP headers
+--		if a.seg.src_port  ~= b.seg.src_port or
+--		   a.seg.dst_port  ~= b.seg.dst_port or
+--		   a.seg.frag_ofs  ~= b.seg.frag_ofs or
+--		   a.seg.frame_len ~= exp_frame_len  or
+--		   a.seg.ack_num   ~= b.seg.ack_num  then
+--		   return false
+--		end
+--
+--		return true --all "relevant" headers matched :-)
+--	end
+
+

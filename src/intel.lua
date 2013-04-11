@@ -437,9 +437,13 @@ function new (pciaddress)
 		return out
 	end
 
+	local function rx_unread() --whether there are uread packets in rx ring buffer
+		return (not rx_empty()) and (regs[RDH] ~= rxnext)
+	end M.rx_unread = rx_unread
+
 	local function receive_fn()
 	  while true do
-		  if regs[RDH] ~= rxnext then
+		  if rx_unread() then
 			 coroutine.yield(rxbuffers[rxnext], format_wb(rxdesc[rxnext].wb))
 			 rxnext = (rxnext + 1) % num_descriptors
 		  else --making it explicit

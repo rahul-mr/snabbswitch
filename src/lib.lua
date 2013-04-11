@@ -66,3 +66,17 @@ function comma_value(n) -- credit http://richard.warburton.it
    return left..(num:reverse():gsub('(%d%d%d)','%1,'):reverse())..right
 end
 
+--create a copy of the given table
+function table_copy(t)
+	local u = { }
+	for k, v in pairs(t) do u[k] = v end
+	return setmetatable(u, getmetatable(t))
+end
+
+--returns pointer to element of 'type' located at 'base'+'offset' address (without any protection ;-))
+function unprotected(type, base, offset)
+	offset = offset or 0
+	return ffi.cast( ffi.typeof("$ *", ffi.typeof(type)),
+					 ffi.cast("uint8_t *", base) + offset)
+end
+
