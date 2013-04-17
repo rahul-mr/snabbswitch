@@ -296,10 +296,12 @@ function new()
 		while true do
 			local frames = {}
 			while M.nic.rx_unread() do --if there are unread packets
+				print("DBG: receive_fn: Enter while M.nic.rx_unread()")
 				local addr, wb = M.nic.receive()--read an unread rx packet
 				assert(addr and wb, "Expected a packet -- check driver code?")
 
 				if wb.valid and wb.ipv6 and wb.tcp and wb.eop then --XXX non-eop (multi desc)
+					print("DBG: receive_fn: Enter if wb.valid and wb.ipv6 and wb.tcp and wb.eop")
 					local pkt = unprotected("struct frame_hdr", addr.mem)
 					assert(bswap16(pkt.eth.type) == 0x86DD and 
 						   bit.band(bit.bswap(pkt.ipv6.ver_traf_flow), 0xf0000000) == 0x60000000 and
@@ -309,13 +311,15 @@ function new()
 					local dst=true
 					local i=1
 					--check destination MAC
-					while dst do
+					while dst and i<=6 do
+						print("pkt.eth.dst_mac[i-1]", pkt.eth.dst_mac[i-1], "M.opt.eth.src:byte(i)", M.opt.eth.src:byte(i))
 						if pkt.eth.dst_mac[i-1] ~= M.opt.eth.src:byte(i) then dst = false end
 						i = i + 1
 					end
 					--check destination IP
 					i=1
-					while dst do
+					while dst and i<=16 do
+						print("pkt.ipv6.dst_addr[i-1]", pkt.ipv6.dst_addr[i-1], "M.opt.ip.src:byte(i)",M.opt.ip.src:byte(i))
 						if pkt.ipv6.dst_addr[i-1] ~= M.opt.ip.src:byte(i) then dst = false end
 						i = i + 1
 					end
@@ -323,8 +327,10 @@ function new()
 					dst = dst and (bswap16(pkt.seg.dst_port) == STT_DST_PORT)
 
 					--XXX gotta trust other fields for the time being
+					print("DBG: receive_fn: dst => ", dst)
 					
 					if dst then
+						print("DBG: receive_fn: if dst")
 						local key = {}
 						local src_addr = unprotected("uint32_t", pkt.ipv6.src_addr)
 						for i=0, 3 do
@@ -339,6 +345,7 @@ function new()
 
 						if M.flow[key] ~= nil then
 							if M.flow[key].ack ~= ack then --discard old flow and generate a new one
+								print("DBG: receive_fn: discarding old flow")
 								M.flow[key] = nil
 								new_flow = true
 							end
@@ -351,7 +358,9 @@ function new()
 						local pkt_added = false
 
 						if new_flow then
+							print("DBG: receive_fn: if new_flow")
 							if pkt.seg.frag_ofs == 0 then --otherwise some packets presumed lost
+								print("DBG: receive_fn: if pkt.seg.frag_ofs == 0")
 								M.flow[key] = { ack=ack,
 												total_len=bswap16(pkt.seg.frame_len),
 												cur_len=psize,
@@ -363,6 +372,8 @@ function new()
 								pkt_added = true
 							end
 						else --add chunk
+							print("DBG: receive_fn: oldflow")
+
 							if (M.flow[key].cur_len + psize <= M.flow[key].total_len) and
 							   (M.flow[key].total_len == bswap16(pkt.seg.frame_len)) and
 							   (M.flow[key].cur_len == bswap16(pkt.seg.frag_ofs)) then
@@ -371,12 +382,15 @@ function new()
 																						},
 																				  size=psize
 																				}
+								print("DBG: receive_fn: add chunk (pkt_added = true)")
+
 								M.flow[key].cur_len = M.flow[key].cur_len + psize
 								pkt_added = true
 							end
 						end --else new_flow
 						
 						if pkt_added and (M.flow[key].total_len == M.flow[key].cur_len) then --complete STT frame
+							print("DBG: receive_fn: completed stt frame")
 							frames[1 + #frames] = table_copy(M.flow[key].chunks)
 							M.flow[key] = nil
 						end
@@ -445,6 +459,19 @@ function new()
 		local frames = M.receive()
 		print("frames = ", frames)
 		print("#frames = ", #frames)
+
+		for f=1, #frames do --each frame
+			for c=1, #(frames[f])	do --each chunk
+				print("\nDBG: chunk #"..tostring(c))
+				print("addrs.phy = ", frames[f][c].addrs.phy)
+				print("addrs.mem = ", frames[f][c].addrs.mem)
+				print("size = ", frames[f][c].size)
+				local mem = unprotected("uint8_t", frames[f][c].addrs.mem)
+				for m=0, (frames[f][c].size)-1 do
+					io.write("0x"..bit.tohex(mem[m])..", ")
+				end
+			end
+		end
 
 	end --function M.selftest()
 	return M

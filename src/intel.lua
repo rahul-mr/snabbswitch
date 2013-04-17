@@ -438,15 +438,20 @@ function new (pciaddress)
 	end
 
 	local function rx_unread() --whether there are uread packets in rx ring buffer
-		return (not M.rx_empty()) and (regs[RDH] ~= rxnext)
+--		print("DBG: rx_unread: rx_empty =>", M.rx_empty(), "regs[RDH] =>", regs[RDH], "regs[RDT] =>", regs[RDT], "rxnext =>", rxnext)
+		return (regs[RDH] ~= rxnext) 
 	end M.rx_unread = rx_unread
 
 	local function receive_fn()
 	  while true do
 		  if rx_unread() then
-			 coroutine.yield(rxbuffers[rxnext], format_wb(rxdesc[rxnext].wb))
+			 local index = rxnext
 			 rxnext = (rxnext + 1) % num_descriptors
+			 print("DBG: intel: receive_fn: updated rxnext to => "..tostring(rxnext))
+--			 print("DBG: intel: receive_fn: yielding addr, wb")
+			 coroutine.yield(rxbuffers[index], format_wb(rxdesc[index].wb))
 		  else --making it explicit
+			 print("DBG: intel: receive_fn: yielding { }")
 			 coroutine.yield()
 		  end
 		end
