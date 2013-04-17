@@ -312,14 +312,14 @@ function new()
 					local i=1
 					--check destination MAC
 					while dst and i<=6 do
-						print("pkt.eth.dst_mac[i-1]", pkt.eth.dst_mac[i-1], "M.opt.eth.src:byte(i)", M.opt.eth.src:byte(i))
+--						print("pkt.eth.dst_mac[i-1]", pkt.eth.dst_mac[i-1], "M.opt.eth.src:byte(i)", M.opt.eth.src:byte(i))
 						if pkt.eth.dst_mac[i-1] ~= M.opt.eth.src:byte(i) then dst = false end
 						i = i + 1
 					end
 					--check destination IP
 					i=1
 					while dst and i<=16 do
-						print("pkt.ipv6.dst_addr[i-1]", pkt.ipv6.dst_addr[i-1], "M.opt.ip.src:byte(i)",M.opt.ip.src:byte(i))
+--						print("pkt.ipv6.dst_addr[i-1]", pkt.ipv6.dst_addr[i-1], "M.opt.ip.src:byte(i)",M.opt.ip.src:byte(i))
 						if pkt.ipv6.dst_addr[i-1] ~= M.opt.ip.src:byte(i) then dst = false end
 						i = i + 1
 					end
@@ -460,18 +460,38 @@ function new()
 		print("frames = ", frames)
 		print("#frames = ", #frames)
 
+		assert(#frames == 1) --1 frame
+		assert(#(frames[1]) == 3) --3 chunks
+		assert(frames[1][1].size == 1422) --chunk #1
+		assert(frames[1][2].size == 1422) --chunk #2
+		assert(frames[1][3].size == 1270) --chunk #3
+
+		local cur_pos = -18 --to skip the STT frame header
+
 		for f=1, #frames do --each frame
 			for c=1, #(frames[f])	do --each chunk
 				print("\nDBG: chunk #"..tostring(c))
 				print("addrs.phy = ", frames[f][c].addrs.phy)
 				print("addrs.mem = ", frames[f][c].addrs.mem)
 				print("size = ", frames[f][c].size)
+
 				local mem = unprotected("uint8_t", frames[f][c].addrs.mem)
 				for m=0, (frames[f][c].size)-1 do
-					io.write("0x"..bit.tohex(mem[m])..", ")
+					--io.write("0x"..bit.tohex(mem[m])..", ")
+					if cur_pos >= 0 then
+						if cur_pos < #tx_header then
+							assert(mem[m] == tx_header[1 + cur_pos], "cur_pos = "..tostring(cur_pos))
+						else
+							assert(mem[m] == 0x41)
+						end
+					end
+
+					cur_pos = cur_pos + 1
 				end
 			end
 		end
+
+		assert(cur_pos == tx_size) --all transmitted bytes covered
 
 	end --function M.selftest()
 	return M
