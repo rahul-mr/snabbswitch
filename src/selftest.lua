@@ -6,6 +6,7 @@ local C = ffi.C
 local test = require("test")
 local memory = require("memory")
 local crc = require("crc")
+local STT = require("stt")
 
 print "\nCRC-14 Unit tests:\n"
 crc.unittest_crc14()
@@ -57,12 +58,21 @@ for _,device in ipairs(pci.suitable_devices()) do
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
-   for i = 1, 100 do
-   print("\nNIC selftest_verify_tso(): Count: "..tostring(i))
-   nic.init()
-   nic.reset_stats()
-   nic.selftest_verify_tso()
-   end
+	for i=1, 1 do
+		print("\nNIC selftest_verify_tso(): Count: "..tostring(i))
+		nic.init()
+		nic.reset_stats()
+		nic.selftest_verify_tso()
+	end
+
+	print("\nSTT selftest:")
+	nic.init()
+	nic.reset_stats()
+
+	local stt = STT.new()
+	stt.init{ nic=nic }
+	stt.selftest()
+
 --   print "\nNIC tx tso test - UDP, IPv6, size=4096, mss=1434" -- max frame size = 1500 (62 + 1434 + 4)
 --   nic.init()
 --   nic.reset_stats()

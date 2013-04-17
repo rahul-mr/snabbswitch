@@ -545,7 +545,10 @@ function new (pciaddress)
 
       local frame_len = 14 -- Ethernet frame length
       local mem = protected("uint8_t", context, frame_len, 60 + 60) --for accessing IP/TCP header fields
+--		for i=0, 77 do print("DBG: transmit: mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i]))) end
       local ver = bit.band(mem[0], 0x60)
+--		print("DBG: intel: add_txbuf_tso: mem[0] = 0x"..bit.tohex(tonumber(mem[0])))
+--		print("DBG: intel: add_txbuf_tso: ver = 0x"..bit.tohex(tonumber(ver)))
       local ipcs_off = nil -- IP checksum field offset
       local hdr_len  = nil -- IP header length
       local plen_off = nil -- IP payload length field offset
@@ -579,6 +582,7 @@ function new (pciaddress)
         addrs_bytes = 32
 
       else
+		print("DBG: intel: add_txbuf_tso: ver = 0x"..bit.tohex(tonumber(ver)))
         assert(false, "Invalid IP version/Unknown format")
       end --ver
 
@@ -598,7 +602,8 @@ function new (pciaddress)
         ctx.tucmd = bits({tcp=0}, ctx.tucmd) --set TCP flag
 
         local tcp_len = 4 * bit.rshift( bit.band( mem[hdr_len+12], 0xF0 ), 4 ) --read Data Offset field 
-        --print("DBG: tcp_len = " .. bit.tohex(tcp_len)) --TCP header length
+		print("DBG: mem["..tostring(hdr_len+12).."] = "..bit.tohex(tonumber(mem[hdr_len+12])))
+        print("DBG: tcp_len = " .. bit.tohex(tcp_len)) --TCP header length
         assert(tcp_len >= 20 , "Invalid value for TCP data offset field")
         ctx.hdrlen = frame_len + hdr_len + tcp_len
         ctx.paylen = pkt_len - hdr_len - tcp_len
@@ -877,7 +882,7 @@ function new (pciaddress)
       print("Statistics for PCI device " .. pciaddress .. ":")
       for _,reg in ipairs(statistics_regs) do
          name, desc = reg[1], reg[3]
-         if M.stats[name] > 0 then
+         if M.stats[name] and M.stats[name] > 0 then
             print(("%20s %-10s %s"):format(lib.comma_value(M.stats[name]), name, desc))
          end
       end

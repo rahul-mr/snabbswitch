@@ -112,6 +112,7 @@ function new()
 	--Initialization function
 	--options: dictionary containing default values for Eth/IP/STT headers, tx/rx descriptor count
 	function M.init(options)
+		assert(options, "Need options dic")
 		M.ack = 0
 		M.nic = options.nic or assert(false, "stt.lua:: init: options.nic required")
 
@@ -120,17 +121,19 @@ function new()
 		M.tx.desc = protected(M.tx.type, M.tx.desc, 0, M.tx.total)
 		M.tx.next = 0
 
-		M.opt.eth.src  = options.eth.src 
-		M.opt.eth.dst  = options.eth.dst 
-		M.opt.ip.src   = options.ip.src  
-		M.opt.ip.dst   = options.ip.dst  
-		M.opt.ip.vtf   = options.ip.vtf  
-		M.opt.ip.next  = options.ip.next
-		M.opt.ip.hop   = options.ip.hop
-		M.opt.stt.flag = options.stt.flag  
-		M.opt.stt.mss  = options.stt.mss    
-		M.opt.stt.vlan = options.stt.vlan   
-		M.opt.stt.ctx  = options.stt.ctx 
+		local opt_eth, opt_ip, opt_stt = options.eth or {}, options.ip or {}, options.stt or {}
+
+		M.opt.eth.src  = opt_eth.src 
+		M.opt.eth.dst  = opt_eth.dst 
+		M.opt.ip.src   = opt_ip.src  
+		M.opt.ip.dst   = opt_ip.dst  
+		M.opt.ip.vtf   = opt_ip.vtf  
+		M.opt.ip.next  = opt_ip.next
+		M.opt.ip.hop   = opt_ip.hop
+		M.opt.stt.flag = opt_stt.flag  
+		M.opt.stt.mss  = opt_stt.mss    
+		M.opt.stt.vlan = opt_stt.vlan   
+		M.opt.stt.ctx  = opt_stt.ctx 
 
 		M.flow = {}
 		math.randomseed( tonumber(tostring(os.time()):reverse():sub(1,6)) ) --http://lua-users.org/wiki/MathLibraryTutorial
@@ -138,7 +141,7 @@ function new()
 	   																  --to maintain correct 'encapsulated' packet flow
 	end
 
-	M.init()
+	--M.init()
 
 	-- Transmit the given packet using STT
 	-- pkt: encapsulated packet options - dictionary containing following:
@@ -150,25 +153,28 @@ function new()
 		assert(pkt and pkt.mem and pkt.phy and pkt.size, "pkt is invalid")
 		assert(pkt.size <= 65444, "pkt.size must be <= 65444") --max supported pkt.size is (2^16) - (14 + 40 + 20 + 18)
 
-		M.opt.eth.src  = options.eth.src  or M.opt.eth.src  or assert(false, "options.eth.src invalid")
-		M.opt.eth.dst  = options.eth.dst  or M.opt.eth.dst  or assert(false, "options.eth.dst invalid")
-		M.opt.ip.src   = options.ip.src   or M.opt.ip.src   or assert(false, "options.ip.src invalid")
-		M.opt.ip.dst   = options.ip.dst   or M.opt.ip.dst   or assert(false, "options.ip.dst invalid")
-		M.opt.ip.vtf   = options.ip.vtf   or M.opt.ip.vtf   or 0x06
-		M.opt.ip.next  = options.ip.next  or M.opt.ip.next  or 0x06
-		M.opt.ip.hop   = options.ip.hop   or M.opt.ip.hop   or 0x40
-		M.opt.stt.flag = options.stt.flag or M.opt.stt.flag or bits{cs_partial=1} --if TSO used, set cs_partial bit
-		M.opt.stt.mss  = options.stt.mss  or M.opt.stt.mss  or 1422 --1500 - (14 + 40 + 20) - 4
-		M.opt.stt.vlan = options.stt.vlan or M.opt.stt.vlan or { pcp=0x00, cfi=0x00, id=0x00 }
-		M.opt.stt.ctx  = options.stt.ctx  or M.opt.stt.ctx  or 0
+		local opt_eth, opt_ip, opt_stt = options.eth or {}, options.ip or {}, options.stt or {}
 
+		M.opt.eth.src  = opt_eth.src  or M.opt.eth.src  or assert(false, "opt_eth.src invalid")
+		M.opt.eth.dst  = opt_eth.dst  or M.opt.eth.dst  or assert(false, "opt_eth.dst invalid")
+		M.opt.ip.src   = opt_ip.src   or M.opt.ip.src   or assert(false, "opt_ip.src invalid")
+		M.opt.ip.dst   = opt_ip.dst   or M.opt.ip.dst   or assert(false, "opt_ip.dst invalid")
+		M.opt.ip.vtf   = opt_ip.vtf   or M.opt.ip.vtf   or 0x60 --version
+		M.opt.ip.next  = opt_ip.next  or M.opt.ip.next  or 0x06
+		M.opt.ip.hop   = opt_ip.hop   or M.opt.ip.hop   or 0x40
+		M.opt.stt.flag = opt_stt.flag or M.opt.stt.flag or bits{cs_partial=1} --if TSO used, set cs_partial bit
+		M.opt.stt.mss  = opt_stt.mss  or M.opt.stt.mss  or 1422 --1500 - (14 + 40 + 20) - 4
+		M.opt.stt.vlan = opt_stt.vlan or M.opt.stt.vlan 
+		M.opt.stt.ctx  = opt_stt.ctx  or M.opt.stt.ctx  or 0
+		print("DBG: transmit: vtf = "..bit.tohex(tonumber(M.opt.ip.vtf)))
 		assert(M.opt.eth.src:len() == 6, "eth.src should have length 6")
 		assert(M.opt.eth.dst:len() == 6, "eth.dst should have length 6")
 		assert(M.opt.ip.src:len() == 16, "ip.src should have length 16") 
 		assert(M.opt.ip.dst:len() == 16, "ip.dst should have length 16") 
 
 		local pm = protected("uint8_t", pkt.mem, 0, 78) --14 + 60 + 4 [Max: eth + ipv4 + tcp/udp ports] 
-		local ver = bit.band(pm[0], 0x60)
+--		for i=0, 77 do print("DBG: transmit: pm["..tostring(i).."] = "..bit.tohex(tonumber(pm[i]))) end
+		local ver = bit.band(pm[14], 0x60) --version 14 + 0
 		local proto = nil
 		local ip_hdr_len = nil
 		local src_addr_off = nil
@@ -181,21 +187,27 @@ function new()
 		end
 
 		M.tx.desc[M.tx.next].hdr.ipv6.ver_traf_flow = M.opt.ip.vtf
-		M.tx.desc[M.tx.next].hdr.ipv6.next_header   = M.opt.ip.next
+		M.tx.desc[M.tx.next].hdr.ipv6.next_hdr   = M.opt.ip.next
 		M.tx.desc[M.tx.next].hdr.ipv6.hop_limit     = M.opt.ip.hop
 
 		for i=1, 16 do
-		  M.tx.desc[M.tx.next].hdr.ipv6.dst_ip[i-1] = M.opt.ip.dst:byte(i) 
-		  M.tx.desc[M.tx.next].hdr.ipv6.src_ip[i-1] = M.opt.ip.src:byte(i) 
+		  M.tx.desc[M.tx.next].hdr.ipv6.dst_addr[i-1] = M.opt.ip.dst:byte(i) 
+		  M.tx.desc[M.tx.next].hdr.ipv6.src_addr[i-1] = M.opt.ip.src:byte(i) 
 		end
 		
 		M.tx.desc[M.tx.next].stt_hdr.flags  = M.opt.stt.flag 
 		M.tx.desc[M.tx.next].stt_hdr.mss    = M.opt.stt.mss
-		M.tx.desc[M.tx.next].stt_hdr.vlan   = bit.band( bit.bor(bit.lshift(M.opt.stt.vlan.pcp, 13), 
-													  			bit.lshift(M.opt.stt.vlan.cfi, 12),
-																M.opt.stt.vlan.id),
-														0xffff)
+		if M.opt.stt.vlan then
+			M.tx.desc[M.tx.next].stt_hdr.vlan   = bit.band( bit.bor(bit.lshift(M.opt.stt.vlan.pcp, 13), 
+																	bit.lshift(M.opt.stt.vlan.cfi, 12),
+																	M.opt.stt.vlan.vid),
+															0xffff)
+		else
+			M.tx.desc[M.tx.next].stt_hdr.vlan = 0
+		end
 		M.tx.desc[M.tx.next].stt_hdr.ctx_id = M.opt.stt.ctx 
+
+		print("DBG: transmit: ver = 0x"..bit.tohex(tonumber(ver)))
 
 		if ver == 0x40 then      --IPv4
 			proto = pm[23]     --14 + 9
@@ -232,9 +244,10 @@ function new()
 		M.tx.desc[M.tx.next].hdr.seg.dst_port = STT_DST_PORT
 		M.tx.desc[M.tx.next].hdr.seg.frame_len = 18 + pkt.size --stt frame header + encapsulated packet
 		M.tx.desc[M.tx.next].hdr.seg.ack_num = M.ack
+		M.tx.desc[M.tx.next].hdr.seg.data_ofs = 0x50 --5 words(20 bytes)
 		M.tx.desc[M.tx.next].hdr.seg.flags = bits{ack=4}
 
-		M.tx.desc[M.tx.next].hdr.ipv6.paylen = 20 + 18 + pkt.size --TCP-like header + stt frame header + encapsulated packet
+		M.tx.desc[M.tx.next].hdr.ipv6.pay_len = 20 + 18 + pkt.size --TCP-like header + stt frame header + encapsulated packet
 
 		local descriptors = { { address = M.tx.phy, size = ffi.sizeof(M.tx.type) }, --Eth + IPv6 + TCP + STT frame header
 						 	  { address = pkt.phy,  size = pkt.size }               --Encapsulated packet
@@ -242,11 +255,12 @@ function new()
 		local size = descriptors[1].size + descriptors[2].size
 		local context = M.tx.desc._ptr + M.tx.next * descriptors[1].size
 
-		nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, context, M.opt.stt.vlan )
+		M.nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, context, M.opt.stt.vlan )
 
-		nic.flush_tx()
-		nic.wait_tx(size) --wait for transmission
-		nic.clear_tx()
+		M.nic.flush_tx()
+		C.usleep(2000000) -- 2 sec wait
+		--M.nic.wait_tx(size) --wait for transmission
+		M.nic.clear_tx()
 
 		M.ack = (M.ack + 1) % 0x10000 --2^16
 		M.tx.next = (M.tx.next + 1) % M.tx.total
@@ -281,13 +295,13 @@ function new()
 					--check destination MAC
 					while dst do
 						if pkt.eth.dst_mac[i-1] ~= M.opt.eth.src:byte(i) then dst = false end
-						i += 1
+						i = i + 1
 					end
 					--check destination IP
 					i=1
 					while dst do
 						if pkt.ipv6.dst_addr[i-1] ~= M.opt.ip.src:byte(i) then dst = false end
-						i += 1
+						i = i + 1
 					end
 					--check destination TCP port
 					dst = dst and (pkt.seg.dst_port == STT_DST_PORT)
@@ -359,6 +373,47 @@ function new()
 	end --function receive_fn()
 	M.receive = coroutine.wrap(receive_fn)
 
+	-- A simple STT selftest
+	function M.selftest()
+		assert(M.nic)
+		test.waitfor("linkup", M.nic.linkup, 20, 250000)
+		M.nic.enable_mac_loopback()
+		local size = 4096	--4KB packet
+		local buf, buf_phy = memory.dma_alloc(size) 
+		buf = protected("uint8_t", buf, 0, size)
+
+		                    --Ethernet+IPv6+TCP headers
+		local tx_header = { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
+						    0x00, 0x00, 0x0F, 0xCA, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+							0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+							0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }
+		
+		for i=1, #tx_header do
+			buf[i-1] = tx_header[i] --byte copy
+		end
+
+		for j=#tx_header, size-1 do
+			buf[j] = 0x41 --char 'A'
+		end
+
+		local pkt = { mem=buf._ptr, phy=buf_phy, size=size }
+		local options = { eth={ src="\x01\x01\x01\x01\x01\x01", 
+								dst="\x02\x02\x02\x02\x02\x02" 
+							  },
+						   ip={ src="\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03",
+						   	    dst="\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04" 
+						      } 
+						}
+
+		print("stt.selftest - Before Transmit - nic statistics")
+		M.nic.print_stats()
+		M.transmit(pkt, options)
+		M.nic.update_stats()
+		print("stt.selftest - After Transmit - nic statistics")
+		M.nic.print_stats()
+
+	end --function M.selftest()
 	return M
 
 end --function new

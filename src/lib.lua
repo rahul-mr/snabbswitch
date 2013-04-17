@@ -1,5 +1,7 @@
 module(...,package.seeall)
 
+local ffi = require("ffi")
+
 function readfile (filename, what)
    local f = io.open(filename, "r")
    if f == nil then error("Unable to open file: " .. filename) end
@@ -30,6 +32,23 @@ end
 -- Return true if bit number 'n' of 'value' is set.
 function bitset (value, n)
    return bit.band(value, bit.lshift(1, n)) ~= 0
+end
+
+function protected (type, base, offset, size)
+      type = ffi.typeof(type)
+      local bound = ((size * ffi.sizeof(type)) + 0ULL) / ffi.sizeof(type) 
+      local tptr = ffi.typeof("$ *", type)
+      local wrap = ffi.metatype(ffi.typeof("struct { $ _ptr; }", tptr), {
+                                   __index = function(w, idx)
+                                                assert(idx < bound)
+                                                return w._ptr[idx]
+                                             end,
+                                   __newindex = function(w, idx, val)
+                                                   assert(idx < bound)
+                                                   w._ptr[idx] = val
+                                                end,
+                                })
+      return wrap(ffi.cast(tptr, ffi.cast("uint8_t *", base) + offset))
 end
 
 function bitset2(value, flags)
