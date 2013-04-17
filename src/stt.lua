@@ -33,8 +33,8 @@ struct stt_seg_hdr
 {
 	uint16_t src_port;
 	uint16_t dst_port;
-	uint16_t frag_ofs;    /* used by STT (TCP seq_num_L)*/
 	uint16_t frame_len;   /* used by STT (TCP seq_num_H)*/
+	uint16_t frag_ofs;    /* used by STT (TCP seq_num_L)*/
 	uint32_t ack_num;     /* used by STT (const for each segment of an STT frame)*/
 	uint8_t  data_ofs;    /* lower nibble */
 	uint8_t  flags;       /* upper 6 bits (only? -XXX) */
@@ -163,14 +163,13 @@ function new()
 		M.opt.eth.dst  = opt_eth.dst  or M.opt.eth.dst  or assert(false, "opt_eth.dst invalid")
 		M.opt.ip.src   = opt_ip.src   or M.opt.ip.src   or assert(false, "opt_ip.src invalid")
 		M.opt.ip.dst   = opt_ip.dst   or M.opt.ip.dst   or assert(false, "opt_ip.dst invalid")
-		M.opt.ip.vtf   = opt_ip.vtf   or M.opt.ip.vtf   or 0x60 --version
+		M.opt.ip.vtf   = opt_ip.vtf   or M.opt.ip.vtf   or { ver=0x6, tc=0x00, fl=0x00 }
 		M.opt.ip.next  = opt_ip.next  or M.opt.ip.next  or 0x06
 		M.opt.ip.hop   = opt_ip.hop   or M.opt.ip.hop   or 0x40
 		M.opt.stt.flag = opt_stt.flag or M.opt.stt.flag or bits{cs_partial=1} --if TSO used, set cs_partial bit
 		M.opt.stt.mss  = opt_stt.mss  or M.opt.stt.mss  or 1422 --1500 - (14 + 40 + 20) - 4
 		M.opt.stt.vlan = opt_stt.vlan or M.opt.stt.vlan 
 		M.opt.stt.ctx  = opt_stt.ctx  or M.opt.stt.ctx  or 0
-		print("DBG: transmit: vtf = "..bit.tohex(tonumber(M.opt.ip.vtf)))
 		assert(M.opt.eth.src:len() == 6, "eth.src should have length 6")
 		assert(M.opt.eth.dst:len() == 6, "eth.dst should have length 6")
 		assert(M.opt.ip.src:len() == 16, "ip.src should have length 16") 
@@ -192,7 +191,9 @@ function new()
 
 		M.tx.desc[M.tx.next].hdr.eth.type = bswap16(0x86dd)
 
-		M.tx.desc[M.tx.next].hdr.ipv6.ver_traf_flow = M.opt.ip.vtf
+		M.tx.desc[M.tx.next].hdr.ipv6.ver_traf_flow = bit.bswap( bit.bor( bit.lshift(M.opt.ip.vtf.ver, 28),
+																    	  bit.lshift(M.opt.ip.vtf.tc,  20),
+																		  M.opt.ip.vtf.fl ) )
 		M.tx.desc[M.tx.next].hdr.ipv6.next_hdr   = M.opt.ip.next
 		M.tx.desc[M.tx.next].hdr.ipv6.hop_limit     = M.opt.ip.hop
 
@@ -247,10 +248,11 @@ function new()
 		end
 
 		print("DBG: src_port = "..tostring(49152 + hash.generate()).." AKA 0x"..bit.tohex(49152 + hash.generate()))
+		print("DBG: frame_len = "..tostring(18 + pkt.size).." AKA 0x"..bit.tohex(18 + pkt.size))
 		M.tx.desc[M.tx.next].hdr.seg.src_port = bswap16(49152 + hash.generate()) --generate a 14-bit hash
 		M.tx.desc[M.tx.next].hdr.seg.dst_port = bswap16(STT_DST_PORT)
-		M.tx.desc[M.tx.next].hdr.seg.frame_len = 18 + pkt.size --stt frame header + encapsulated packet
-		M.tx.desc[M.tx.next].hdr.seg.ack_num = M.ack
+		M.tx.desc[M.tx.next].hdr.seg.frame_len = bswap16(18 + pkt.size) --stt frame header + encapsulated packet
+		M.tx.desc[M.tx.next].hdr.seg.ack_num = bit.bswap(M.ack)
 		M.tx.desc[M.tx.next].hdr.seg.data_ofs = 0x50 --5 words(20 bytes)
 		M.tx.desc[M.tx.next].hdr.seg.flags = bits{ack=4}
 
@@ -293,14 +295,14 @@ function new()
 	local function receive_fn()
 		while true do
 			local frames = {}
-			while nic.rx_unread() do --if there are unread packets
-				local addr, wb = nic.receive()--read an unread rx packet
+			while M.nic.rx_unread() do --if there are unread packets
+				local addr, wb = M.nic.receive()--read an unread rx packet
 				assert(addr and wb, "Expected a packet -- check driver code?")
 
 				if wb.valid and wb.ipv6 and wb.tcp and wb.eop then --XXX non-eop (multi desc)
 					local pkt = unprotected("struct frame_hdr", addr.mem)
-					assert(pkt.eth.type == 0x86DD and 
-						   bit.band(pkt.ipv6.ver_traf_flow, 0xf0000000) == 0x60000000 and
+					assert(bswap16(pkt.eth.type) == 0x86DD and 
+						   bit.band(bit.bswap(pkt.ipv6.ver_traf_flow), 0xf0000000) == 0x60000000 and
 						   pkt.ipv6.next_hdr == 0x06,
 						   "Only Eth + IPv6 + TCP(STT) supported -- invalid wb.status check driver code?")
 
@@ -318,20 +320,21 @@ function new()
 						i = i + 1
 					end
 					--check destination TCP port
-					dst = dst and (pkt.seg.dst_port == STT_DST_PORT)
+					dst = dst and (bswap16(pkt.seg.dst_port) == STT_DST_PORT)
 
 					--XXX gotta trust other fields for the time being
 					
 					if dst then
 						local key = {}
-						for i=1, 4 do
-							key[1 + #key] = bit.tohex( unprotected("uint32_t", pkt.ipv6.src_addr)[i-1] )
+						local src_addr = unprotected("uint32_t", pkt.ipv6.src_addr)
+						for i=0, 3 do
+							key[1 + #key] = bit.tohex( bit.bswap(src_addr[i]) )
 						end
 						key[1 + #key] = "|" --seperator
-						key[1 + #key] = bit.tohex(pkt.seg.src_port)
+						key[1 + #key] = bit.tohex( bswap16(pkt.seg.src_port) )
 						key = table.concat(key) --generate the final string
 
-						local ack = pkt.seg.ack_num
+						local ack = bit.bswap(pkt.seg.ack_num)
 						local new_flow = false
 
 						if M.flow[key] ~= nil then
@@ -350,7 +353,7 @@ function new()
 						if new_flow then
 							if pkt.seg.frag_ofs == 0 then --otherwise some packets presumed lost
 								M.flow[key] = { ack=ack,
-												total_len=pkt.seg.frame_len,
+												total_len=bswap16(pkt.seg.frame_len),
 												cur_len=psize,
 												chunks={ { addrs={ phy=addr.phy + hsize, mem=addr.mem + hsize },
 														   size=psize
@@ -361,8 +364,8 @@ function new()
 							end
 						else --add chunk
 							if (M.flow[key].cur_len + psize <= M.flow[key].total_len) and
-							   (M.flow[key].total_len == pkt.seg.frame_len) and
-							   (M.flow[key].cur_len == pkt.seg.frag_ofs) then
+							   (M.flow[key].total_len == bswap16(pkt.seg.frame_len)) and
+							   (M.flow[key].cur_len == bswap16(pkt.seg.frag_ofs)) then
 								M.flow[key].chunks[1 + #(M.flow[key].chunks)] = { addrs={ phy=addr.phy + hsize, 
 																						  mem=addr.mem + hsize 
 																						},
@@ -392,9 +395,23 @@ function new()
 		assert(M.nic)
 		test.waitfor("linkup", M.nic.linkup, 20, 250000)
 		M.nic.enable_mac_loopback()
-		local size = 4096	--4KB packet
-		local buf, buf_phy = memory.dma_alloc(size) 
-		buf = protected("uint8_t", buf, 0, size)
+		local tx_size = 4096	--4KB packets
+		local rx_size = 4096
+		local rx_count = 3
+		local tx_buf, tx_buf_phy = memory.dma_alloc(tx_size) 
+		local rx_buf, rx_buf_phy = memory.dma_alloc(rx_size * rx_count) 
+		tx_buf = protected("uint8_t", tx_buf, 0, tx_size)
+
+		print("DBG: rx_buf_phy => ", rx_buf_phy, rx_buf_phy==false)
+		print("DBG: rx_buf => ", rx_buf, rx_buf==nil)
+
+		local rx_buf_tail = 0
+		for i=1, rx_count do
+			print("DBG: rx: phy =>", rx_buf_phy + rx_buf_tail, "buf =>", rx_buf + rx_buf_tail)
+			M.nic.add_rxbuf( rx_buf_phy + rx_buf_tail, rx_buf + rx_buf_tail )
+			rx_buf_tail = rx_buf_tail + rx_size
+		end
+		M.nic.flush_rx()
 
 		                    --Ethernet+IPv6+TCP headers
 		local tx_header = { 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x86, 0xDD, 0x60, 0x00,
@@ -404,28 +421,30 @@ function new()
 							0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xE4, 0x2B, 0x00, 0x00 }
 		
 		for i=1, #tx_header do
-			buf[i-1] = tx_header[i] --byte copy
+			tx_buf[i-1] = tx_header[i] --byte copy
 		end
 
-		for j=#tx_header, size-1 do
-			buf[j] = 0x41 --char 'A'
+		for j=#tx_header, tx_size-1 do
+			tx_buf[j] = 0x41 --char 'A'
 		end
 
-		local pkt = { mem=buf._ptr, phy=buf_phy, size=size }
+		local pkt = { mem=tx_buf._ptr, phy=tx_buf_phy, size=tx_size }
 		local options = { eth={ src="\x01\x02\x03\x04\x05\x06", 
-								dst="\x07\x08\x09\x0a\x0b\x0c" 
+								dst="\x01\x02\x03\x04\x05\x06" 
 							  },
-						   ip={ src="\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+						   ip={ src="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff", 
 						   	    dst="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff" 
 						      } 
-						}
+						} --Note: src and dst are same since this is a loopback test
 
-		print("stt.selftest - Before Transmit - nic statistics")
-		M.nic.print_stats()
 		M.transmit(pkt, options)
 		M.nic.update_stats()
 		print("stt.selftest - After Transmit - nic statistics")
 		M.nic.print_stats()
+
+		local frames = M.receive()
+		print("frames = ", frames)
+		print("#frames = ", #frames)
 
 	end --function M.selftest()
 	return M

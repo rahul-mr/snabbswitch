@@ -438,7 +438,7 @@ function new (pciaddress)
 	end
 
 	local function rx_unread() --whether there are uread packets in rx ring buffer
-		return (not rx_empty()) and (regs[RDH] ~= rxnext)
+		return (not M.rx_empty()) and (regs[RDH] ~= rxnext)
 	end M.rx_unread = rx_unread
 
 	local function receive_fn()
