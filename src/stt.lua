@@ -142,6 +142,10 @@ function new()
 	end
 
 	--M.init()
+	local function bswap16(n)
+		return bit.bor( bit.lshift(bit.band(n, 0xff), 8), 
+				 		bit.rshift(bit.band(n, 0xff00), 8) )
+	end
 
 	-- Transmit the given packet using STT
 	-- pkt: encapsulated packet options - dictionary containing following:
@@ -185,6 +189,8 @@ function new()
 		  M.tx.desc[M.tx.next].hdr.eth.dst_mac[i-1] = M.opt.eth.dst:byte(i) 
 		  M.tx.desc[M.tx.next].hdr.eth.src_mac[i-1] = M.opt.eth.src:byte(i) 
 		end
+
+		M.tx.desc[M.tx.next].hdr.eth.type = bswap16(0x86dd)
 
 		M.tx.desc[M.tx.next].hdr.ipv6.ver_traf_flow = M.opt.ip.vtf
 		M.tx.desc[M.tx.next].hdr.ipv6.next_hdr   = M.opt.ip.next
@@ -240,20 +246,28 @@ function new()
 			hash.add_byte(pm[src_addr_off + i])
 		end
 
-		M.tx.desc[M.tx.next].hdr.seg.src_port = 49152 + hash.generate() --generate a 14-bit hash
-		M.tx.desc[M.tx.next].hdr.seg.dst_port = STT_DST_PORT
+		print("DBG: src_port = "..tostring(49152 + hash.generate()).." AKA 0x"..bit.tohex(49152 + hash.generate()))
+		M.tx.desc[M.tx.next].hdr.seg.src_port = bswap16(49152 + hash.generate()) --generate a 14-bit hash
+		M.tx.desc[M.tx.next].hdr.seg.dst_port = bswap16(STT_DST_PORT)
 		M.tx.desc[M.tx.next].hdr.seg.frame_len = 18 + pkt.size --stt frame header + encapsulated packet
 		M.tx.desc[M.tx.next].hdr.seg.ack_num = M.ack
 		M.tx.desc[M.tx.next].hdr.seg.data_ofs = 0x50 --5 words(20 bytes)
 		M.tx.desc[M.tx.next].hdr.seg.flags = bits{ack=4}
 
-		M.tx.desc[M.tx.next].hdr.ipv6.pay_len = 20 + 18 + pkt.size --TCP-like header + stt frame header + encapsulated packet
+		M.tx.desc[M.tx.next].hdr.ipv6.pay_len = bswap16(20 + 18 + pkt.size) --TCP-like header + stt frame header + encapsulated packet
 
 		local descriptors = { { address = M.tx.phy, size = ffi.sizeof(M.tx.type) }, --Eth + IPv6 + TCP + STT frame header
 						 	  { address = pkt.phy,  size = pkt.size }               --Encapsulated packet
 					  		}
 		local size = descriptors[1].size + descriptors[2].size
 		local context = M.tx.desc._ptr + M.tx.next * descriptors[1].size
+
+		print("DBG: stt: transmit: size = "..tostring(size))
+		print("DBG: stt: transmit: descriptors[1].size = "..tostring(descriptors[1].size))
+		local dctx = protected("uint8_t", context, 0, descriptors[1].size)
+		for i=0,  descriptors[1].size - 1 do
+			io.write("0x"..bit.tohex(tonumber(dctx[i]))..", ")
+		end
 
 		M.nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, context, M.opt.stt.vlan )
 
@@ -398,11 +412,11 @@ function new()
 		end
 
 		local pkt = { mem=buf._ptr, phy=buf_phy, size=size }
-		local options = { eth={ src="\x01\x01\x01\x01\x01\x01", 
-								dst="\x02\x02\x02\x02\x02\x02" 
+		local options = { eth={ src="\x01\x02\x03\x04\x05\x06", 
+								dst="\x07\x08\x09\x0a\x0b\x0c" 
 							  },
-						   ip={ src="\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03",
-						   	    dst="\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04\x04" 
+						   ip={ src="\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+						   	    dst="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff" 
 						      } 
 						}
 

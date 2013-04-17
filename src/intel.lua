@@ -879,13 +879,16 @@ function new (pciaddress)
    end
 
    function M.print_stats ()
-      print("Statistics for PCI device " .. pciaddress .. ":")
-      for _,reg in ipairs(statistics_regs) do
-         name, desc = reg[1], reg[3]
-         if M.stats[name] and M.stats[name] > 0 then
-            print(("%20s %-10s %s"):format(lib.comma_value(M.stats[name]), name, desc))
-         end
-      end
+     print("Statistics for PCI device " .. pciaddress .. ":")
+     for _,reg in ipairs(statistics_regs) do
+       name, desc = reg[1], reg[3]
+	   if not M.stats[name] then 
+		   print("call update_stats() first")
+		   return
+	   elseif M.stats[name] > 0 then
+         print(("%20s %-10s %s"):format(lib.comma_value(M.stats[name]), name, desc))
+       end
+     end
    end
 
    function M.wait_tx(size) --wait for transmission of size bytes (tested with add_txbuf_tso)
