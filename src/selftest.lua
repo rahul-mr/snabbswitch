@@ -58,12 +58,12 @@ for _,device in ipairs(pci.suitable_devices()) do
 --   nic.init()
 --   nic.reset_stats()
 --   nic.selftest_tso({ipv6=true, size=4096, mss=1422, loopback=true, receive=true})
-	for i=1, 1 do
-		print("\nNIC selftest_verify_tso(): Count: "..tostring(i))
-		nic.init()
-		nic.reset_stats()
-		nic.selftest_verify_tso()
-	end
+--	for i=1, 1 do
+--		print("\nNIC selftest_verify_tso(): Count: "..tostring(i))
+--		nic.init()
+--		nic.reset_stats()
+--		nic.selftest_verify_tso()
+--	end
 
 	print("\nSTT selftest:")
 	nic.init()

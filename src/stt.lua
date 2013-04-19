@@ -137,7 +137,7 @@ function new()
 
 		M.flow = {}
 		math.randomseed( tonumber(tostring(os.time()):reverse():sub(1,6)) ) --http://lua-users.org/wiki/MathLibraryTutorial
-		M.get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --transmit() needs the same hash fn between calls
+		M.get_random_hash = HASH_ALGOS[ math.random(1, #HASH_ALGOS) ] --enqueue() needs the same hash fn between calls
 	   																  --to maintain correct 'encapsulated' packet flow
 	end
 
@@ -147,13 +147,13 @@ function new()
 				 		bit.rshift(bit.band(n, 0xff00), 8) )
 	end
 
-	-- Transmit the given packet using STT
+	-- Enqueue the given packet for transmission
 	-- pkt: encapsulated packet options - dictionary containing following:
 	--      mem: is of type ffi.cast("uint8_t *", ..., size); -- Read-only
 	--      phy: is the physical address of the packet buffer (passed to nic)
 	--      size: is the size of the packet
 	-- options: [optional if configured in init()] 
-	function M.transmit(pkt, options)
+	function M.enqueue(pkt, options)
 		assert(pkt and pkt.mem and pkt.phy and pkt.size, "pkt is invalid")
 		assert(pkt.size <= 65444, "pkt.size must be <= 65444") --max supported pkt.size is (2^16) - (14 + 40 + 20 + 18)
 
@@ -273,28 +273,32 @@ function new()
 		print("context = ", context)
 		print("M.tx.next = ", M.tx.next)
 		print("M.tx.desc._ptr = ", M.tx.desc._ptr)
-		print("M.tx.desc._ptr + descriptors[1].size = ", M.tx.desc._ptr + descriptors[1].size)
-		print("M.tx.desc._ptr + 2*descriptors[1].size = ", M.tx.desc._ptr + 2*descriptors[1].size)
-
-		--print("dctx1 = ", dctx + descriptors[1].size)
-		--print("dctx2 = ", dctx + descriptors[2].size)
-
-		print()
-		for i=0,  descriptors[1].size - 1 do
-			io.write("0x"..bit.tohex(tonumber(context[i]))..", ")
-			--if((i+1)%(descriptors[1].size)==0) then print(); print(); end
-		end
-		print()
+--		print("M.tx.desc._ptr + descriptors[1].size = ", M.tx.desc._ptr + descriptors[1].size)
+--		print("M.tx.desc._ptr + 2*descriptors[1].size = ", M.tx.desc._ptr + 2*descriptors[1].size)
+--
+--		--print("dctx1 = ", dctx + descriptors[1].size)
+--		--print("dctx2 = ", dctx + descriptors[2].size)
+--
+--		print()
+--		for i=0,  descriptors[1].size - 1 do
+--			io.write("0x"..bit.tohex(tonumber(context[i]))..", ")
+--			--if((i+1)%(descriptors[1].size)==0) then print(); print(); end
+--		end
+--		print()
 
 		M.nic.add_txbuf_tso( descriptors, size, M.opt.stt.mss, context, M.opt.stt.vlan )
 
-		M.nic.flush_tx()
-		C.usleep(2000000) -- 2 sec wait
-		--M.nic.wait_tx(size) --wait for transmission
-		M.nic.clear_tx()
-
 		M.ack = (M.ack + 1) % 0x10000 --2^16
 		M.tx.next = (M.tx.next + 1) % M.tx.total
+	end
+
+	--transmit (flush) the queued packets and wait for 'usecs' microseconds
+	function M.transmit(usecs)
+		usecs = usecs or 250000 --250ms
+		M.nic.flush_tx()
+		C.usleep(usecs)
+		--M.nic.wait_tx(size) --wait for transmission
+		M.nic.clear_tx()
 	end
 
 	--Receive a "big" packet using STT
@@ -427,7 +431,7 @@ function new()
 		local tx_size = 4096	--4KB packets
 		local rx_size = 4096
 		local chunk_count = 3 --num of expected chunks for each "big" packet
-		local repetitions = 2 --num of times the "big" packet is transmitted during this selftest
+		local repetitions = 5 --num of times the "big" packet is transmitted during this selftest
 		local tx_buf, tx_buf_phy = memory.dma_alloc(tx_size) 
 		local rx_buf, rx_buf_phy = memory.dma_alloc(rx_size * chunk_count * repetitions) 
 		tx_buf = protected("uint8_t", tx_buf, 0, tx_size)
@@ -468,11 +472,13 @@ function new()
 						} --Note: src and dst are same since this is a loopback test
 
 		for t=1, repetitions do
-			M.transmit(pkt, options)
-			M.nic.update_stats()
-			print("stt.selftest - After Transmit #"..tostring(t).." - nic statistics")
-			M.nic.print_stats()
+			M.enqueue(pkt, options)
 		end
+
+		M.transmit(1000000) --block
+		M.nic.update_stats()
+		print("stt.selftest - After Transmitting : "..tostring(repetitions).." big packets - nic statistics")
+		M.nic.print_stats()
 
 		local frames = M.receive()
 		print("frames = ", frames)
