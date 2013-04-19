@@ -358,9 +358,11 @@ function new()
 						key[1 + #key] = "|" --seperator
 						key[1 + #key] = bit.tohex( bswap16(pkt.seg.src_port) )
 						key = table.concat(key) --generate the final string
-
+						
 						local ack = bit.bswap(pkt.seg.ack_num)
 						local new_flow = false
+
+						print("DBG: key:", key, "ack:", ack)
 
 						if M.flow[key] ~= nil then
 							if M.flow[key].ack ~= ack then --discard old flow and generate a new one
