@@ -550,7 +550,7 @@ function new (pciaddress)
 
       local frame_len = 14 -- Ethernet frame length
       local mem = protected("uint8_t", context, frame_len, 60 + 60) --for accessing IP/TCP header fields
---		for i=0, 77 do print("DBG: transmit: mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i]))) end
+		for i=0, 77 do print("DBG: transmit: mem["..tostring(i).."] = "..bit.tohex(tonumber(mem[i]))) end
       local ver = bit.band(mem[0], 0x60)
 --		print("DBG: intel: add_txbuf_tso: mem[0] = 0x"..bit.tohex(tonumber(mem[0])))
 --		print("DBG: intel: add_txbuf_tso: ver = 0x"..bit.tohex(tonumber(ver)))
