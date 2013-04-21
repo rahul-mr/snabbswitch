@@ -350,29 +350,30 @@ function new()
 					
 					if dst then
 						print("DBG: receive_fn: if dst")
-						local key = {}
-						local src_addr = unprotected("uint32_t", pkt.ipv6.src_addr)
-						for i=0, 3 do
-							key[1 + #key] = bit.tohex( bit.bswap(src_addr[i]) )
-						end
-						key[1 + #key] = "|" --seperator
-						key[1 + #key] = bit.tohex( bswap16(pkt.seg.src_port) )
-						key = table.concat(key) --generate the final string
-						
 						local ack = bit.bswap(pkt.seg.ack_num)
+						print("DBG: ack:", ack)
+
+						local src_addr = unprotected("uint32_t", pkt.ipv6.src_addr)
+						local s_addr = { }
+						for i=0, 3 do
+							s_addr[1 + #s_addr] = bit.bswap(src_addr[i])
+						end
+						local s_port = bswap16(pkt.seg.src_port)
+						
 						local new_flow = false
 
-						print("DBG: key:", key, "ack:", ack)
-
-						if M.flow[key] ~= nil then
-							if M.flow[key].ack ~= ack then --discard old flow and generate a new one
-								print("DBG: receive_fn: discarding old flow")
-								M.flow[key] = nil
-								new_flow = true
+						if M.flow[ack] ~= nil then
+							i=1
+							while (not new_flow) and i<=4 do
+								if M.flow[ack].src_addr[i] ~= s_addr[i] then
+									new_flow = true
+								end
+								i = i + 1
 							end
+							new_flow = new_flow or (M.flow[ack].src_port ~= s_port)
 						else
 							new_flow = true	
-						end --else M.flow[key]	
+						end --else M.flow[ack]	
 
 						local hsize = ffi.sizeof("struct frame_hdr")
 						local psize = wb.length - hsize
@@ -380,9 +381,10 @@ function new()
 
 						if new_flow then
 							print("DBG: receive_fn: if new_flow")
-							if pkt.seg.frag_ofs == 0 then --otherwise some packets presumed lost
-								print("DBG: receive_fn: if pkt.seg.frag_ofs == 0")
-								M.flow[key] = { ack=ack,
+							if pkt.seg.frag_ofs == 0 then --else packets of new flow presumed lost (so this packet rejected)
+								print("DBG: receive_fn: new_flow -- (pkt_added = true)")
+								M.flow[ack] = { src_addr = s_addr,
+												src_port = s_port,
 												total_len=bswap16(pkt.seg.frame_len),
 												cur_len=psize,
 												chunks={ { addrs={ phy=addr.phy + hsize, mem=addr.mem + hsize },
@@ -391,29 +393,29 @@ function new()
 													   }
 											  }
 								pkt_added = true
-							end
+							end 
 						else --add chunk
 							print("DBG: receive_fn: oldflow")
 
-							if (M.flow[key].cur_len + psize <= M.flow[key].total_len) and
-							   (M.flow[key].total_len == bswap16(pkt.seg.frame_len)) and
-							   (M.flow[key].cur_len == bswap16(pkt.seg.frag_ofs)) then
-								M.flow[key].chunks[1 + #(M.flow[key].chunks)] = { addrs={ phy=addr.phy + hsize, 
+							if (M.flow[ack].cur_len + psize <= M.flow[ack].total_len) and
+							   (M.flow[ack].total_len == bswap16(pkt.seg.frame_len)) and
+							   (M.flow[ack].cur_len == bswap16(pkt.seg.frag_ofs)) then
+								M.flow[ack].chunks[1 + #(M.flow[ack].chunks)] = { addrs={ phy=addr.phy + hsize, 
 																						  mem=addr.mem + hsize 
 																						},
 																				  size=psize
 																				}
-								print("DBG: receive_fn: add chunk (pkt_added = true)")
+								print("DBG: receive_fn: oldflow -- add chunk (pkt_added = true)")
 
-								M.flow[key].cur_len = M.flow[key].cur_len + psize
+								M.flow[ack].cur_len = M.flow[ack].cur_len + psize
 								pkt_added = true
 							end
 						end --else new_flow
 						
-						if pkt_added and (M.flow[key].total_len == M.flow[key].cur_len) then --complete STT frame
+						if pkt_added and (M.flow[ack].total_len == M.flow[ack].cur_len) then --complete STT frame
 							print("DBG: receive_fn: completed stt frame")
-							frames[1 + #frames] = M.flow[key].chunks
-							M.flow[key] = nil
+							frames[1 + #frames] = M.flow[ack].chunks
+							M.flow[ack] = nil --free ack
 						end
 					end--if dst
 				end --if wb.valid
