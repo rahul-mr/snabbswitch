@@ -507,15 +507,16 @@ function new (pciaddress)
    end M.add_txbuf = add_txbuf
 
    local function flush_tx()
+	   print("DBG: intel: flush_tx: tdt = ", tdt)
       regs[TDT] = tdt
    end M.flush_tx = flush_tx
 
-   local function clear_tx()
-      tdt = 0
-      regs[TDT] = 0
-      regs[TDH] = 0
-      C.usleep(1000) -- wait for 1 ms
-   end M.clear_tx = clear_tx
+--   local function clear_tx() --Don't use this (wrong!)
+--      tdt = 0
+--      regs[TDT] = 0
+--      regs[TDH] = 0
+--      C.usleep(1000) -- wait for 1 ms
+--   end M.clear_tx = clear_tx
 
    local function tx_diagnostics()
       print ("DBG: regs[TDFH]  = "..bit.tohex(regs[TDFH]))
@@ -998,7 +999,7 @@ function new (pciaddress)
       --print "waiting for packet transmission..."
       -- Wait a safe time and check hardware count
       C.usleep(100000) -- wait for 100ms transmit --WARNING: if the delay is reduced(say, 10ms) will cause NIC lockup
-      M.clear_tx()
+      --M.clear_tx()
       --M.clear_rx()
       M.update_stats()
       local txhardware = M.stats.GPTC - txhardware_start 
@@ -1223,7 +1224,7 @@ function new (pciaddress)
 
 		M.flush_tx()
 		C.usleep(100000) --wait for 100ms so that transmission is completed
-		M.clear_tx()
+		--M.clear_tx()
 
 --		print("DBG: verify_tso: Statistics [After]")
 		M.update_stats()

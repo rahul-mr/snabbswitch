@@ -299,7 +299,7 @@ function new()
 		M.nic.flush_tx()
 		C.usleep(usecs)
 		--M.nic.wait_tx(size) --wait for transmission
-		M.nic.clear_tx()
+		--M.nic.clear_tx() --XXX wrong!
 	end
 
 	--Receive a "big" packet using STT
@@ -476,11 +476,21 @@ function new()
 						      } 
 						} --Note: src and dst are same since this is a loopback test
 
-		for t=1, repetitions do
+		for t=1, repetitions-1 do --4 big
 			M.enqueue(pkt, options)
 		end
+		M.transmit(1000) --block 1ms
+		M.enqueue(pkt, options) --1 big
+		M.transmit(1000) --block 1ms
+--		M.enqueue(pkt, options)
+--		M.enqueue(pkt, options)
+--		M.transmit(100000) --block 100ms
+--		M.enqueue(pkt, options)
+--		M.enqueue(pkt, options)
+--		M.transmit(100000) --block 100ms
+--		M.enqueue(pkt, options)
+--		M.transmit(100000) --block 100ms
 
-		M.transmit(1000000) --block
 		M.nic.update_stats()
 		print("stt.selftest - After Transmitting : "..tostring(repetitions).." big packets - nic statistics")
 		M.nic.print_stats()
