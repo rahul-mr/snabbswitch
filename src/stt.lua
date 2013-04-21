@@ -118,7 +118,7 @@ function new()
 
 		M.tx.total = options.tx_total or 10 --total num of descriptors
 		M.tx.desc, M.tx.phy = memory.dma_alloc(M.tx.total * ffi.sizeof(M.tx.type))
-		M.tx.desc = protected(M.tx.type, M.tx.desc, 0, M.tx.total)
+		M.tx.desc = unprotected(M.tx.type, M.tx.desc)--, 0, M.tx.total)
 		M.tx.next = 0
 
 		local opt_eth, opt_ip, opt_stt = options.eth or {}, options.ip or {}, options.stt or {}
@@ -175,7 +175,7 @@ function new()
 		assert(M.opt.ip.src:len() == 16, "ip.src should have length 16") 
 		assert(M.opt.ip.dst:len() == 16, "ip.dst should have length 16") 
 
-		local pm = protected("uint8_t", pkt.mem, 0, 78) --14 + 60 + 4 [Max: eth + ipv4 + tcp/udp ports] 
+		local pm = unprotected("uint8_t", pkt.mem)--, 0, 78) --14 + 60 + 4 [Max: eth + ipv4 + tcp/udp ports] 
 --		for i=0, 77 do print("DBG: transmit: pm["..tostring(i).."] = "..bit.tohex(tonumber(pm[i]))) end
 		local ver = bit.band(pm[14], 0x60) --version 14 + 0
 		local proto = nil
@@ -269,10 +269,11 @@ function new()
 		print("DBG: stt: transmit: size = "..tostring(size))
 		print("DBG: stt: transmit: descriptors[1].size = "..tostring(descriptors[1].size))
 		--local dctx = protected("uint8_t", context, 0, descriptors[1].size)
-		local context = unprotected("uint8_t", M.tx.desc._ptr, (M.tx.next * descriptors[1].size ) )
+		local context = unprotected("uint8_t", M.tx.desc, (M.tx.next * descriptors[1].size ) ) --M.tx.desc._ptr for protect
 		print("context = ", context)
 		print("M.tx.next = ", M.tx.next)
-		print("M.tx.desc._ptr = ", M.tx.desc._ptr)
+		print("M.tx.desc = ", M.tx.desc)
+		--print("M.tx.desc._ptr = ", M.tx.desc._ptr)
 --		print("M.tx.desc._ptr + descriptors[1].size = ", M.tx.desc._ptr + descriptors[1].size)
 --		print("M.tx.desc._ptr + 2*descriptors[1].size = ", M.tx.desc._ptr + 2*descriptors[1].size)
 --
@@ -438,7 +439,7 @@ function new()
 		local repetitions = 5 --num of times the "big" packet is transmitted during this selftest
 		local tx_buf, tx_buf_phy = memory.dma_alloc(tx_size) 
 		local rx_buf, rx_buf_phy = memory.dma_alloc(rx_size * chunk_count * repetitions) 
-		tx_buf = protected("uint8_t", tx_buf, 0, tx_size)
+		tx_buf = unprotected("uint8_t", tx_buf)--, 0, tx_size)
 
 		print("DBG: rx_buf_phy => ", rx_buf_phy, rx_buf_phy==false)
 		print("DBG: rx_buf => ", rx_buf, rx_buf==nil)
@@ -466,7 +467,7 @@ function new()
 			tx_buf[j] = 0x41 --char 'A'
 		end
 
-		local pkt = { mem=tx_buf._ptr, phy=tx_buf_phy, size=tx_size }
+		local pkt = { mem=tx_buf, phy=tx_buf_phy, size=tx_size } --tx_buf._ptr for protected
 		local options = { eth={ src="\x01\x02\x03\x04\x05\x06", 
 								dst="\x01\x02\x03\x04\x05\x06" 
 							  },
