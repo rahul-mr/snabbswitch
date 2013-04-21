@@ -437,15 +437,16 @@ function new()
 		local rx_size = 4096
 		local chunk_count = 3 --num of expected chunks for each "big" packet
 		local repetitions = 5 --num of times the "big" packet is transmitted during this selftest
+		local exp_packets = repetitions * chunk_count --number of expected packets
 		local tx_buf, tx_buf_phy = memory.dma_alloc(tx_size) 
-		local rx_buf, rx_buf_phy = memory.dma_alloc(rx_size * chunk_count * repetitions) 
+		local rx_buf, rx_buf_phy = memory.dma_alloc(rx_size * exp_packets) 
 		tx_buf = unprotected("uint8_t", tx_buf)--, 0, tx_size)
 
 		print("DBG: rx_buf_phy => ", rx_buf_phy, rx_buf_phy==false)
 		print("DBG: rx_buf => ", rx_buf, rx_buf==nil)
 
 		local rx_buf_tail = 0
-		for i=1, chunk_count * repetitions do
+		for i=1, exp_packets do
 			print("DBG: rx: phy =>", rx_buf_phy + rx_buf_tail, "buf =>", rx_buf + rx_buf_tail)
 			M.nic.add_rxbuf( rx_buf_phy + rx_buf_tail, rx_buf + rx_buf_tail )
 			rx_buf_tail = rx_buf_tail + rx_size
@@ -494,6 +495,17 @@ function new()
 		M.nic.update_stats()
 		print("stt.selftest - After Transmitting : "..tostring(repetitions).." big packets - nic statistics")
 		M.nic.print_stats()
+
+		local bpkt_bytes = (14 + 40 + 20)*chunk_count + 18 + tx_size + 4*chunk_count --number of bytes for a big packet
+		local exp_bytes  = repetitions * bpkt_bytes --total bytes transmitted/received
+		--XXX the stats should be modified according to the driver
+		local stats = { PRC1522=exp_packets, GPRC=exp_packets, MPRC=exp_packets, GPTC=exp_packets, 
+						GORCL=exp_bytes, GOTCL=exp_bytes, MPTC=exp_packets, TORL=exp_bytes, TOTL=exp_bytes,
+						TPR=exp_packets, TPT=exp_packets, PTC1522=exp_packets, MPTC=exp_packets, TSCTC=repetitions
+					  }
+		for k, v in pairs(stats) do
+			assert( M.nic.stats[k] == v )
+		end
 
 		local frames = M.receive()
 		print("frames = ", frames)
