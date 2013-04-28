@@ -489,6 +489,8 @@ function new()
 			if not (got=="" or got=="y") then 
 				os.exit(1) 
 			end
+			print("Starting in 5 seconds...")
+			C.usleep(5000000)
 		end
 
 		for t=1, repetitions-1 do --4 big
