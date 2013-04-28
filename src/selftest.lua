@@ -80,11 +80,11 @@ for _,device in ipairs(pci.suitable_devices()) do
 	stt.init{ nic=nic }
 	--XXX IMPORTANT: REVERSE ADDRESSES AT PEER ;-) XXX
 	stt.selftest{   loopback=false, 
-					address={ eth={ src="\x01\x02\x03\x04\x05\x06",
-                                    dst="\x06\x05\x04\x03\x02\x01"
+					address={ eth={ src="\x30\x85\xa9\xa3\xc1\x11", --bern
+                                    dst="\x30\x85\xa9\xa3\xc1\x10"  --arbon
                                   },
-                               ip={ src="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
-                                    dst="\xff\xee\xdd\xcc\xbb\xaa\x99\x88\x77\x66\x55\x44\x33\x22\x11\x00"
+                               ip={ src="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x05\x09\x64\x11", --bern
+							   		dst="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x05\x09\x64\x10"  --arbon
                                   }
                             }
 				 }

@@ -522,13 +522,13 @@ function new()
 		local bpkt_bytes = (14 + 40 + 20)*chunk_count + 18 + tx_size + 4*chunk_count --number of bytes for a big packet
 		local exp_bytes  = repetitions * bpkt_bytes --total bytes transmitted/received
 		--XXX the stats should be modified according to the driver
-		local stats = { PRC1522=exp_packets, GPRC=exp_packets, MPRC=exp_packets, GPTC=exp_packets, 
-						GORCL=exp_bytes, GOTCL=exp_bytes, MPTC=exp_packets, TORL=exp_bytes, TOTL=exp_bytes,
-						TPR=exp_packets, TPT=exp_packets, PTC1522=exp_packets, MPTC=exp_packets, TSCTC=repetitions
+		local stats = { PRC1522=exp_packets, GPRC=exp_packets, GPTC=exp_packets, 
+						GORCL=exp_bytes, GOTCL=exp_bytes, TORL=exp_bytes, TOTL=exp_bytes,
+						TPR=exp_packets, TPT=exp_packets, PTC1522=exp_packets, TSCTC=repetitions
 					  }
---		for k, v in pairs(stats) do
---			assert( M.nic.stats[k] == v, "Expected:", k, "=>" v, "Received:", M.nic.stats[k] )
---		end
+		for k, v in pairs(stats) do
+			assert( M.nic.stats[k] == v, "Expected: "..tostring(k).." => "..tostring(v).." Got: "..tostring(M.nic.stats[k]))
+		end
 
 		print("frames = ", frames)
 		print("#frames = ", #frames)
