@@ -73,6 +73,20 @@ for _,device in ipairs(pci.suitable_devices()) do
 	stt.init{ nic=nic }
 	stt.selftest()
 
+	print("\nSTT tunnel selftest:")
+	nic.init()
+	nic.reset_stats()
+
+	stt.init{ nic=nic }
+	stt.selftest{   loopback=false, 
+					address={ eth={ src="\x01\x02\x03\x04\x05\x06",
+                                    dst="\x06\x05\x04\x03\x02\x01"
+                                  },
+                               ip={ src="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+                                    dst="\xff\xee\xdd\xcc\xbb\xaa\x99\x88\x77\x66\x55\x44\x33\x22\x11\x00"
+                                  }
+                            }
+				 }
 --   print "\nNIC tx tso test - UDP, IPv6, size=4096, mss=1434" -- max frame size = 1500 (62 + 1434 + 4)
 --   nic.init()
 --   nic.reset_stats()

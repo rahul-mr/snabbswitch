@@ -429,10 +429,16 @@ function new()
 	M.receive = coroutine.wrap(receive_fn)
 
 	-- A simple STT selftest
-	function M.selftest()
+	function M.selftest(settings)
+		settings = settings or { }
 		assert(M.nic)
 		test.waitfor("linkup", M.nic.linkup, 20, 250000)
-		M.nic.enable_mac_loopback()
+		if settings.loopback ~= false then 
+			M.nic.enable_mac_loopback() 
+		else
+			print("DBG: tunnel test 1")
+			assert(settings.address, "provide {src,dst} {mac,ip} addresses for tunnel test")
+		end
 		local tx_size = 4096	--4KB packets
 		local rx_size = 4096
 		local chunk_count = 3 --num of expected chunks for each "big" packet
@@ -469,13 +475,21 @@ function new()
 		end
 
 		local pkt = { mem=tx_buf, phy=tx_buf_phy, size=tx_size } --tx_buf._ptr for protected
-		local options = { eth={ src="\x01\x02\x03\x04\x05\x06", 
-								dst="\x01\x02\x03\x04\x05\x06" 
-							  },
-						   ip={ src="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff", 
-						   	    dst="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff" 
-						      } 
-						} --Note: src and dst are same since this is a loopback test
+		local options = settings.address or { eth={ src="\x01\x02\x03\x04\x05\x06", 
+													dst="\x01\x02\x03\x04\x05\x06" 
+												  },
+										       ip={ src="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff", 
+												    dst="\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff" 
+												  }
+											} --Note: src and dst are same since this is a loopback test
+
+		if settings.loopback == false then --tunnel test
+			io.write("Start transmit test? (y/n) [y]:")
+			local got = io.read():gsub("^%s*(.-)%s*$", "%1"):lower() --trim white space
+			if not (got=="" or got=="y") then 
+				os.exit(1) 
+			end
+		end
 
 		for t=1, repetitions-1 do --4 big
 			M.enqueue(pkt, options)
@@ -548,9 +562,8 @@ function new()
 			print("\nDBG: cur_pos = "..tostring(cur_pos))
 	--		assert(cur_pos == tx_size) --all transmitted bytes covered
 		end
-
-
 	end --function M.selftest()
+
 	return M
 
 end --function new
