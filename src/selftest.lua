@@ -65,19 +65,20 @@ for _,device in ipairs(pci.suitable_devices()) do
 --		nic.selftest_verify_tso()
 --	end
 
-	print("\nSTT selftest:")
-	nic.init()
-	nic.reset_stats()
+--	print("\nSTT selftest:")
+--	nic.init()
+--	nic.reset_stats()
 
 	local stt = STT.new()
-	stt.init{ nic=nic }
-	stt.selftest()
-
+--	stt.init{ nic=nic }
+--	stt.selftest()
+--
 	print("\nSTT tunnel selftest:")
 	nic.init()
 	nic.reset_stats()
 
 	stt.init{ nic=nic }
+	--XXX IMPORTANT: REVERSE ADDRESSES AT PEER ;-) XXX
 	stt.selftest{   loopback=false, 
 					address={ eth={ src="\x01\x02\x03\x04\x05\x06",
                                     dst="\x06\x05\x04\x03\x02\x01"
